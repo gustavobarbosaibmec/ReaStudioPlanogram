@@ -152,8 +152,8 @@ export function renderPlanogram(planogram, products, opts) {
       const y0 = Y(top.y + top.clearance);
       const y1 = Y(bottom.y);
       out.push(
-        `<rect class="block" x="${block.x0 + 0.4}" y="${y0 + 0.4}" width="${Math.max(0, block.x1 - block.x0 - 0.8)}" height="${y1 - y0 - 0.8}" rx="1"/>`,
-        `<text class="block-label" x="${block.x0 + 1.4}" y="${y0 + 3}">${esc(block.path.join(' › '))}</text>`,
+        `<rect class="pog-block" x="${block.x0 + 0.4}" y="${y0 + 0.4}" width="${Math.max(0, block.x1 - block.x0 - 0.8)}" height="${y1 - y0 - 0.8}" rx="1"/>`,
+        `<text class="pog-block-label" x="${block.x0 + 1.4}" y="${y0 + 3}">${esc(block.path.join(' › '))}</text>`,
       );
     }
   }

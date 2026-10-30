@@ -424,7 +424,7 @@ th {
   pointer-events: none;
 }
 
-.block {
+.pog-block {
   fill: none;
   stroke: var(--primary);
   stroke-width: 0.3;
@@ -433,7 +433,7 @@ th {
   pointer-events: none;
 }
 
-.block-label {
+.pog-block-label {
   font-size: 1.6px;
   font-weight: 700;
   fill: var(--primary);
