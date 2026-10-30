@@ -1,0 +1,444 @@
+/* Base visual compartilhada (escritório e app do promotor): claro, azul-marinho e âmbar. */
+:root {
+  --primary: #1e3a8a;
+  --primary-hover: #1e40af;
+  --primary-soft: #eef2ff;
+  --accent: #f59e0b;
+  --accent-soft: #fff7e6;
+  --ink: #0f172a;
+  --ink-2: #334155;
+  --muted: #64748b;
+  --line: #e2e8f0;
+  --line-2: #f1f5f9;
+  --bg: #f6f8fb;
+  --card: #ffffff;
+  --success: #16a34a;
+  --success-soft: #ecfdf3;
+  --danger: #dc2626;
+  --danger-soft: #fef2f2;
+  --warn: #d97706;
+  --warn-soft: #fffbeb;
+  --radius: 14px;
+  --radius-sm: 10px;
+  --shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 6px 20px rgba(15, 23, 42, 0.05);
+  font-family: Inter, 'Segoe UI', Roboto, system-ui, -apple-system, sans-serif;
+  color: var(--ink);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  font-size: 14px;
+}
+
+h1,
+h2,
+h3 {
+  margin: 0;
+  letter-spacing: -0.01em;
+}
+
+a {
+  color: var(--primary);
+}
+
+/* ---------- controles ---------- */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  font: inherit;
+  font-weight: 600;
+  font-size: 0.875rem;
+  border: 1px solid transparent;
+  background: var(--primary);
+  color: #fff;
+  border-radius: 999px;
+  padding: 0.5rem 1rem;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.btn:hover {
+  background: var(--primary-hover);
+}
+
+.btn:focus-visible,
+.icon-btn:focus-visible,
+.tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.btn.accent {
+  background: var(--accent);
+  color: var(--ink);
+}
+
+.btn.ghost {
+  background: var(--card);
+  color: var(--ink-2);
+  border-color: var(--line);
+}
+
+.btn.ghost:hover {
+  border-color: #cbd5e1;
+  background: var(--line-2);
+}
+
+.btn.danger {
+  background: var(--card);
+  color: var(--danger);
+  border-color: #fecaca;
+}
+
+.btn.success {
+  background: var(--success);
+}
+
+.btn.sm {
+  font-size: 0.8rem;
+  padding: 0.32rem 0.75rem;
+}
+
+.btn.block {
+  width: 100%;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.icon-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 2.1rem;
+  height: 2.1rem;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--ink-2);
+  font: inherit;
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+.link {
+  background: none;
+  border: 0;
+  color: var(--primary);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+}
+
+.link.danger {
+  color: var(--danger);
+}
+
+input,
+select,
+textarea {
+  font: inherit;
+  font-size: 0.875rem;
+  color: var(--ink);
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 0.45rem 0.6rem;
+  width: 100%;
+  min-width: 0;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-soft);
+}
+
+input[type='checkbox'] {
+  width: 1rem;
+  height: 1rem;
+  accent-color: var(--primary);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.check {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  font-size: 0.85rem;
+  color: var(--ink-2);
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.eyebrow {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.hint {
+  color: var(--muted);
+  font-size: 0.8rem;
+  margin: 0.4rem 0 0;
+  line-height: 1.45;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 0.2rem 0.6rem;
+  background: var(--line-2);
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+.chip.novo {
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+
+.chip.em_execucao {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.chip.concluido {
+  background: #ecfeff;
+  color: #0e7490;
+}
+
+.chip.aprovado {
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.chip.devolvido {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.85rem;
+}
+
+th,
+td {
+  text-align: left;
+  padding: 0.55rem 0.6rem;
+  border-bottom: 1px solid var(--line-2);
+  vertical-align: middle;
+}
+
+th {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  border-bottom-color: var(--line);
+}
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+.toast {
+  position: fixed;
+  bottom: 1.2rem;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--ink);
+  color: #fff;
+  padding: 0.6rem 1rem;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  max-width: calc(100% - 32px);
+  box-shadow: var(--shadow);
+  z-index: 50;
+}
+
+/* ---------- gôndola (SVG em cm) ---------- */
+
+.pog-svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.fx-back {
+  fill: #f8fafc;
+  stroke: var(--line);
+  stroke-width: 0.3;
+}
+
+.fx-base {
+  fill: #e2e8f0;
+}
+
+.fx-upright {
+  fill: #cbd5e1;
+}
+
+.fx-shelf {
+  fill: #475569;
+}
+
+.fx-badge {
+  fill: var(--primary);
+}
+
+.fx-badge-text {
+  fill: #fff;
+  font-size: 2.8px;
+  font-weight: 700;
+}
+
+.fx-bay {
+  fill: var(--muted);
+  font-size: 2.6px;
+  font-weight: 600;
+}
+
+.pos {
+  cursor: pointer;
+}
+
+.pos .unit {
+  stroke: rgba(255, 255, 255, 0.7);
+  stroke-width: 0.2;
+}
+
+.unit-sheen {
+  fill: rgba(255, 255, 255, 0.22);
+  pointer-events: none;
+}
+
+.pos-outline {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 0.6;
+}
+
+.pos:hover .pos-outline {
+  stroke: rgba(30, 58, 138, 0.55);
+}
+
+.pos.is-selected .pos-outline,
+.pos.is-hit .pos-outline {
+  stroke: var(--accent);
+  stroke-width: 0.9;
+}
+
+.pos.has-error .pos-outline {
+  stroke: var(--danger);
+  stroke-width: 0.9;
+  stroke-dasharray: 1.2 0.7;
+}
+
+.pos.is-dim {
+  opacity: 0.28;
+}
+
+.pos.is-dragging {
+  opacity: 0.8;
+  cursor: grabbing;
+}
+
+.pos-label {
+  font-size: 1.75px;
+  font-weight: 700;
+  fill: #fff;
+  pointer-events: none;
+}
+
+.pos-facings {
+  font-size: 1.8px;
+  font-weight: 700;
+  fill: var(--ink-2);
+  pointer-events: none;
+}
+
+.chk.ok {
+  fill: var(--success);
+}
+
+.chk.problem {
+  fill: var(--danger);
+}
+
+.chk {
+  stroke: #fff;
+  stroke-width: 0.4;
+}
+
+.chk-text {
+  fill: #fff;
+  font-size: 2.6px;
+  font-weight: 800;
+  pointer-events: none;
+}
+
+.block {
+  fill: none;
+  stroke: var(--primary);
+  stroke-width: 0.3;
+  stroke-dasharray: 1.4 0.9;
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.block-label {
+  font-size: 1.6px;
+  font-weight: 700;
+  fill: var(--primary);
+  pointer-events: none;
+  paint-order: stroke;
+  stroke: #f8fafc;
+  stroke-width: 0.7;
+}

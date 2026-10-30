@@ -1,0 +1,57 @@
+name: APK Android
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Testes do motor e do pacote
+        run: npm test
+
+      - name: Copiar o app do promotor para o projeto Android
+        run: npm run build:www && npx cap sync android
+
+      - name: Gerar APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+
+      - name: Renomear APK
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk planograma-campo.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: planograma-campo-apk
+          path: planograma-campo.apk
+          retention-days: 30
+
+      - name: Publicar na página de Releases (tags v*)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: planograma-campo.apk

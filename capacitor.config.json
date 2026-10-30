@@ -1,0 +1,8 @@
+{
+  "appId": "br.com.planograma.campo",
+  "appName": "Planograma Campo",
+  "webDir": "www",
+  "android": {
+    "allowMixedContent": false
+  }
+}

@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Planograma Studio</title>
+    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="office.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="logo" aria-hidden="true">
+          <svg width="18" height="18" viewBox="0 0 18 18"><rect x="1" y="2" width="16" height="2" rx="1" fill="#fff"/><rect x="1" y="8" width="16" height="2" rx="1" fill="#fff"/><rect x="1" y="14" width="16" height="2" rx="1" fill="#fff"/><rect x="3" y="4.5" width="3" height="3" rx=".6" fill="#f59e0b"/><rect x="7" y="4.5" width="3" height="3" rx=".6" fill="#fff" opacity=".7"/><rect x="11" y="10.5" width="4" height="3" rx=".6" fill="#f59e0b"/></svg>
+        </span>
+        <div><strong>Planograma Studio</strong><small>Planejamento e execução de gôndolas</small></div>
+      </div>
+      <nav class="tabs" role="tablist" aria-label="Seções">
+        <button class="tab" role="tab" data-tab="planogram">Planograma</button>
+        <button class="tab" role="tab" data-tab="products">Produtos</button>
+        <button class="tab" role="tab" data-tab="stores">Lojas</button>
+        <button class="tab" role="tab" data-tab="execution">Execução <span class="count" id="exec-count" hidden></span></button>
+        <button class="tab" role="tab" data-tab="evidence">Evidências</button>
+      </nav>
+      <div class="top-actions">
+        <label class="btn ghost sm file-label">Abrir projeto<input type="file" id="import-json" accept=".json,application/json" hidden /></label>
+        <button type="button" class="btn ghost sm" id="export-json">Salvar projeto</button>
+        <a class="btn ghost sm" href="campo.html" target="_blank" rel="noopener">App do promotor ↗</a>
+      </div>
+    </header>
+
+    <main>
+      <!-- PLANOGRAMA -->
+      <section id="tab-planogram" hidden>
+        <div class="page-title">
+          <div>
+            <span class="eyebrow" id="pog-eyebrow">Planograma</span>
+            <h1 id="pog-title">—</h1>
+          </div>
+          <div class="actions">
+            <select id="store-select" aria-label="Loja"></select>
+            <button type="button" class="btn ghost" id="generate">Gerar automaticamente</button>
+            <button type="button" class="btn accent" data-goto="execution">Publicar para lojas</button>
+          </div>
+        </div>
+
+        <div class="workspace">
+          <aside id="config" class="card rules" aria-label="Regras e gôndola"></aside>
+
+          <section class="card stage">
+            <div class="stage-bar">
+              <div class="segmented" id="color-by" role="group" aria-label="Colorir por">
+                <button type="button" data-value="brand">Marca</button>
+                <button type="button" data-value="subcategory">Subcategoria</button>
+                <button type="button" data-value="dos">Dias de estoque</button>
+              </div>
+              <label class="check"><input type="checkbox" id="show-blocks" /> Blocos</label>
+              <span class="spacer"></span>
+              <div class="zoom">
+                <button type="button" class="icon-btn" data-zoom="-1" aria-label="Diminuir zoom">−</button>
+                <span id="zoom-label">100%</span>
+                <button type="button" class="icon-btn" data-zoom="1" aria-label="Aumentar zoom">+</button>
+              </div>
+              <button type="button" class="btn ghost sm" id="export-csv">Exportar CSV</button>
+            </div>
+            <div id="banner"></div>
+            <div id="canvas" class="canvas"></div>
+            <div id="legend" class="legend"></div>
+          </section>
+
+          <aside class="side" aria-label="Indicadores">
+            <div id="kpis" class="kpis"></div>
+            <div class="card"><h2>Espaço × vendas</h2><div id="space-sales" class="bars"></div>
+              <p class="hint"><span style="color:var(--primary)">■</span> espaço &nbsp; <span style="color:var(--accent)">■</span> vendas</p></div>
+            <div class="card inspector"><h2>Produto selecionado</h2><div id="inspector"></div></div>
+            <div class="card"><h2>Fora do planograma</h2><ul id="unplaced" class="list"></ul></div>
+            <div class="card"><h2>Conformidade</h2><ul id="issues" class="list issues"></ul></div>
+          </aside>
+        </div>
+
+        <details class="card report-card">
+          <summary>Relatório de posições</summary>
+          <div class="table-wrap">
+            <table id="report">
+              <thead><tr><th>Prat.</th><th>Pos.</th><th>SKU</th><th>Descrição</th><th>Marca</th><th>Bloco</th><th>Frentes</th><th>Alt × Prof</th><th>Capac.</th><th>DOS</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </details>
+      </section>
+
+      <!-- PRODUTOS -->
+      <section id="tab-products" hidden>
+        <div class="page-title">
+          <div><span class="eyebrow">Cadastro</span><h1>Biblioteca de produtos</h1></div>
+          <div class="actions">
+            <button type="button" class="btn ghost" id="add-product">+ Produto</button>
+            <label class="btn ghost file-label">Importar CSV<input type="file" id="import-products" accept=".csv,text/csv" hidden /></label>
+            <button type="button" class="btn ghost" id="export-products">Exportar CSV</button>
+          </div>
+        </div>
+        <div class="card page-card">
+          <p class="hint" id="product-count"></p>
+          <p class="hint">Medidas da embalagem vista de frente (largura × altura × profundidade, em cm) e venda média semanal. A foto aparece no planograma e no app do promotor. O CSV aceita “;” ou “,” e o mesmo cabeçalho da exportação.</p>
+          <div class="table-wrap"><table id="products-table" class="edit-table"><thead></thead><tbody></tbody></table></div>
+        </div>
+      </section>
+
+      <!-- LOJAS -->
+      <section id="tab-stores" hidden>
+        <div class="page-title">
+          <div><span class="eyebrow">Localização</span><h1>Lojas</h1></div>
+          <div class="actions">
+            <button type="button" class="btn ghost" id="add-store">+ Loja</button>
+            <button type="button" class="btn" id="run-batch">Gerar para todas as lojas</button>
+          </div>
+        </div>
+        <div class="card page-card">
+          <p class="hint">Cada loja tem seu número de módulos, um índice de venda por subcategoria e os SKUs fora do sortimento. As mesmas regras geram um planograma específico para cada uma.</p>
+          <div class="table-wrap">
+            <table id="stores-table" class="edit-table">
+              <thead><tr><th>Loja</th><th>Módulos</th><th>Índice de venda (subcategoria=fator)</th><th>SKUs fora do sortimento</th><th></th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="card page-card"><h2 style="font-size:1rem;margin-bottom:.5rem">Resultado por loja</h2><div id="batch" class="table-wrap"></div></div>
+      </section>
+
+      <!-- EXECUÇÃO -->
+      <section id="tab-execution" hidden>
+        <div class="page-title">
+          <div><span class="eyebrow">Lojas e promotores</span><h1>Execução</h1></div>
+          <div class="actions">
+            <label class="btn ghost file-label">Importar relatório do promotor<input type="file" id="import-report" accept=".json,application/json" hidden /></label>
+            <button type="button" class="btn" id="download-pack">Baixar pacote para o app</button>
+          </div>
+        </div>
+        <div id="exec-kpis" class="kpis wide"></div>
+        <div class="card page-card">
+          <h2 style="font-size:1rem">Publicar planogramas</h2>
+          <p class="hint">Gera o planograma de cada loja com as regras atuais (a loja aberta no editor usa a versão editada à mão) e cria uma nova versão. Depois baixe o pacote e envie ao promotor por WhatsApp, e-mail ou Drive: o app abre o arquivo e funciona sem internet.</p>
+          <div class="grid2" style="margin-top:.75rem;max-width:760px">
+            <label class="field span2"><span>Recado para as lojas</span><input type="text" id="publish-note" placeholder="Ex.: implantar até sexta; enviar foto da gôndola inteira" /></label>
+            <label class="check"><input type="checkbox" id="publish-timer" checked /> Medir o tempo de execução</label>
+            <div class="row-actions" style="justify-content:flex-end"><span class="muted" id="publish-info"></span><button type="button" class="btn accent" id="publish">Publicar nova versão</button></div>
+          </div>
+        </div>
+        <div class="card page-card">
+          <h2 style="font-size:1rem;margin-bottom:.5rem">Lojas</h2>
+          <div class="table-wrap"><table id="exec-table"><thead><tr><th>Loja</th><th>Categoria</th><th>Versão</th><th>Status</th><th>Conformidade</th><th>Problemas</th><th>Fotos</th><th>Tempo</th><th>Relatório</th><th></th></tr></thead><tbody></tbody></table></div>
+        </div>
+        <div id="review" class="card page-card review" hidden></div>
+      </section>
+
+      <!-- EVIDÊNCIAS -->
+      <section id="tab-evidence" hidden>
+        <div class="card prose">
+          <h2>De onde vieram as ideias</h2>
+          <p>Implementação independente, inspirada em descrições públicas de três produtos. Não usa código, dados, marca nem formatos de arquivo deles. Cada linha diz de onde veio e o grau de certeza.</p>
+
+          <h3>Spaceman (NielsenIQ): geração automática</h3>
+          <table>
+            <thead><tr><th>Afirmação</th><th>Fonte</th><th>Aqui</th></tr></thead>
+            <tbody>
+              <tr><td>Processo integrado com geração automatizada de planogramas.</td><td><a href="https://nielseniq.com/global/pt/products/spaceman/" target="_blank" rel="noopener">Página do produto</a></td><td>“Gerar automaticamente”.</td></tr>
+              <tr><td>Árvore de decisão do shopper → blocos → produtos nos blocos.</td><td><a href="https://nielseniq.com/global/en/landing-page/efficiency-unleashed-how-planogram-automation-is-transforming-retail" target="_blank" rel="noopener">Efficiency Unleashed</a></td><td>Árvore de decisão com até 3 níveis.</td></tr>
+              <tr><td>Planograma por loja com sortimento e dados da loja; encaixe no limite de segmento.</td><td>Efficiency Unleashed</td><td>Aba Lojas; “Encaixar blocos nos módulos”.</td></tr>
+              <tr><td>Regras: localização, critério, sequência e direção.</td><td><a href="https://nielseniq.com/global/en/news-center/2024/nielseniq-and-ltplabs-simplify-the-transition-to-automatic-planogram-generation-with-an-ai-based-solution-to-read-merchandising-rules/" target="_blank" rel="noopener">NIQ + LTPlabs, 2024</a></td><td>Atributo, sequência e direção por nível.</td></tr>
+            </tbody>
+          </table>
+
+          <h3>PlanoHero (Datawiz): execução na loja</h3>
+          <table>
+            <thead><tr><th>Afirmação</th><th>Fonte</th><th>Aqui</th></tr></thead>
+            <tbody>
+              <tr><td>App para a loja: recebe planogramas, avisa de novos e mostra o status das tarefas (novas, concluídas, devolvidas).</td><td><a href="https://planohero.com/en/mobile-app/" target="_blank" rel="noopener">PlanoHero Mobile App</a></td><td>App do promotor: tarefas com status Novo, Em execução, Concluído, Devolvido e Aprovado.</td></tr>
+              <tr><td>Relatório com fotos enviado ao escritório; o escritório confirma ou devolve para refazer.</td><td>PlanoHero Mobile App; <a href="https://apps.apple.com/us/app/id1619103807" target="_blank" rel="noopener">App Store</a></td><td>Fotos no app; aba Execução com Aprovar e Devolver.</td></tr>
+              <tr><td>Ficha do produto com foto, SKU e código de barras.</td><td>PlanoHero Mobile App</td><td>Toque no produto: foto, EAN, SKU, prateleira e posição.</td></tr>
+              <tr><td>Cronômetro do tempo de execução, ligado no envio.</td><td>PlanoHero Mobile App</td><td>“Medir o tempo de execução” ao publicar.</td></tr>
+              <tr><td>Prévia em realidade aumentada; estoque e preços; análise de vendas da rede.</td><td>PlanoHero Mobile App</td><td>Não implementado.</td></tr>
+              <tr><td>Modo offline.</td><td>Só em artigo genérico do próprio fornecedor; a página do app não cita.</td><td>Aqui é offline por projeto: pacote em arquivo, dados guardados no aparelho.</td></tr>
+            </tbody>
+          </table>
+
+          <h3>Figueira Costa: visual e auditoria de execução</h3>
+          <ul>
+            <li>O nome “ShelfMap” não aparece no <a href="https://figueiracosta.com.br/" target="_blank" rel="noopener">site da Figueira Costa</a>. Os produtos listados são Retail Shelf Planner, Planogram Builder, Planomax Retail e Trade, Retail Floor Planner e Retail Merchandising Center.</li>
+            <li>O Planomax Retail distribui e audita planogramas com QR Code e um app de execução (<a href="https://play.google.com/store/apps/details?id=com.figueiracosta.planomax" target="_blank" rel="noopener">Google Play</a>).</li>
+            <li>Visual de referência: fundo claro, azul-marinho com destaque em laranja, cartões brancos com cantos arredondados e prateleiras numeradas em círculos. Foi daí que veio o estilo, não a marca.</li>
+          </ul>
+
+          <h3>Inferido (prática de mercado, não confirmado nos produtos)</h3>
+          <ul>
+            <li>Capacidade = frentes × altura × profundidade; DOS = capacidade ÷ venda diária.</li>
+            <li>Espaço do bloco proporcional à venda, com mínimo para caber o sortimento.</li>
+            <li>Troca de arquivos (pacote e relatório) no lugar de um servidor: é uma escolha deste projeto para funcionar sem internet.</li>
+          </ul>
+        </div>
+      </section>
+    </main>
+
+    <div id="lightbox" class="lightbox" hidden><img alt="Foto do relatório" /></div>
+    <div id="toast" class="toast" role="status" hidden></div>
+    <script type="module" src="src/app.js"></script>
+  </body>
+</html>

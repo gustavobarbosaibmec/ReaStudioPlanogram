@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#1e3a8a" />
+    <title>Planograma Campo</title>
+    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="field.css" />
+  </head>
+  <body class="field">
+    <header class="appbar">
+      <button type="button" class="icon-btn" id="back" aria-label="Voltar" hidden>←</button>
+      <span class="logo-mark" id="logo" aria-hidden="true">
+        <svg width="18" height="18" viewBox="0 0 18 18"><rect x="1" y="2" width="16" height="2" rx="1" fill="#fff"/><rect x="1" y="8" width="16" height="2" rx="1" fill="#fff"/><rect x="1" y="14" width="16" height="2" rx="1" fill="#fff"/><rect x="3" y="4.5" width="3" height="3" rx=".6" fill="#f59e0b"/><rect x="11" y="10.5" width="4" height="3" rx=".6" fill="#f59e0b"/></svg>
+      </span>
+      <div class="titles"><h1 id="title">Planograma Campo</h1><small id="subtitle">Funciona sem internet</small></div>
+    </header>
+
+    <main id="view-home" class="view" hidden></main>
+    <main id="view-task" class="view" hidden></main>
+
+    <input type="file" id="pack-input" hidden />
+    <input type="file" id="photo-input" accept="image/*" capture="environment" hidden />
+    <div id="sheet-root"></div>
+    <div id="toast" class="toast" role="status" hidden></div>
+    <script type="module" src="src/field.js"></script>
+  </body>
+</html>
