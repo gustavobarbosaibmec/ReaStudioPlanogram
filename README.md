@@ -36,6 +36,30 @@ Testes: `npm test` (Node 20+).
 
 Uma versão nova do mesmo planograma substitui a tarefa no aparelho; a mesma versão é ignorada.
 
+## Imagens e medidas dos produtos
+
+A plataforma não vem com imagens: elas vêm do cadastro de vocês (fornecedores, GS1, fotos
+próprias). O **EAN** liga tudo. Na aba **Produtos**:
+
+1. **Planilha** (CSV; no Excel, *Salvar como › CSV*). As colunas são reconhecidas pelo nome:
+   EAN/GTIN/Código de barras, SKU/Código, Descrição, Marca, Subcategoria, Largura, Altura,
+   Profundidade, Venda semanal, Preço, Margem. Medidas em cm; se o cabeçalho disser “mm”
+   (ex.: `Largura (mm)`), converte sozinho. Produtos existentes são atualizados pelo EAN ou SKU
+   e campos vazios não apagam nada; produtos novos sem medida entram desativados.
+2. **Pasta de imagens**: uma foto de frente por produto, com o EAN no nome
+   (`7891000100103.png`, `7891000100103_frente.jpg`) ou o SKU. Arraste a pasta ou escolha os
+   arquivos. Fotos com `lado`, `topo` ou `verso` no nome são ignoradas.
+3. **Conferência** antes de salvar: imagens associadas (com bordas brancas já cortadas e
+   reduzidas para até 480 px em WebP), arquivos não reconhecidos com o motivo (EAN fora do
+   cadastro, dígito verificador inválido, nome sem código) e produtos que continuam sem foto.
+   Fotos cuja proporção não bate com largura × altura são marcadas; quando a foto está
+   deitada e as medidas em pé, dá para trocar largura ↔ altura ali mesmo.
+
+As fotos ficam numa biblioteca separada no navegador do escritório e vão para os celulares
+num **pacote de imagens** (aba Execução › Baixar imagens para o app), enviado à parte do pacote
+de planogramas: só precisa ser reenviado quando as fotos mudarem. O app avisa quando há produto
+sem foto no aparelho.
+
 ## APK (GitHub Actions)
 
 O workflow `.github/workflows/android-apk.yml` roda os testes e gera `planograma-campo.apk`
@@ -65,7 +89,8 @@ Para gerar localmente é preciso JDK 21 e Android SDK: `npm run android:apk`.
 
 - `src/engine.js`: geração (blocos, espaço, frentes, lojas)
 - `src/metrics.js`: indicadores e validação
-- `src/pack.js`: pacote, tarefas, relatório, revisão (formato de troca)
+- `src/catalog.js`: EAN/GTIN, planilha de cadastro e associação de imagens pelo nome do arquivo
+- `src/pack.js`: pacotes de planogramas e de imagens, tarefas, relatório, revisão (formato de troca)
 - `src/render.js`: desenho da gôndola em SVG
 - `src/app.js`: Studio; `src/field.js`: app do promotor
 - `src/store.js`: dados no aparelho (IndexedDB); `src/files.js`: salvar/compartilhar arquivos e fotos

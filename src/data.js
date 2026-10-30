@@ -1,15 +1,10 @@
 // Dados de exemplo (fictícios): categoria Biscoitos. Medidas em cm, vendas em unidades/semana.
 
-// EAN-13 fictício (prefixo 789 do Brasil) com dígito verificador válido
-export function ean13(base12) {
-  const digits = String(base12).padStart(12, '0').slice(-12);
-  const sum = [...digits].reduce((a, d, i) => a + Number(d) * (i % 2 ? 3 : 1), 0);
-  return digits + ((10 - (sum % 10)) % 10);
-}
+import { ean13 } from './catalog.js';
 
 const row = (sku, name, brand, subcategory, width, height, depth, weeklyUnits, price, margin) => ({
   sku, ean: ean13(`7891000${sku.slice(-5)}`), name, brand, subcategory, width, height, depth, weeklyUnits, price, margin,
-  image: '', active: true,
+  imageKey: '', active: true,
 });
 
 export const sampleProducts = [

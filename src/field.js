@@ -13,6 +13,9 @@ import {
   formatDuration,
   makePack,
   makeReport,
+  missingImageKeys,
+  packKind,
+  parseImagePack,
   parsePack,
   publishPlanogram,
 } from './pack.js';
@@ -23,6 +26,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const dateTime = (iso) => (iso ? new Date(iso).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }) : '—');
 
 let tasks = [];
+let images = {}; // chave -> data URL, vindo do pacote de imagens
 let settings = { promoter: '' };
 const ui = { filter: 'pending', mode: 'drawing', bay: 0, zoom: 1, query: '', sheet: null };
 let timerHandle;
@@ -82,10 +86,12 @@ function showHome() {
   const order = { devolvido: 0, em_execucao: 1, novo: 2, concluido: 3, aprovado: 4 };
   const list = tasks.filter(test).sort((a, b) => order[a.status] - order[b.status] || a.planogram.storeName.localeCompare(b.planogram.storeName));
   const toSend = tasks.filter((t) => t.status !== 'novo').length;
+  const noPhoto = missingPhotos(tasks);
 
   $('#view-home').innerHTML = `
+    ${noPhoto ? `<div class="note" style="margin:0 0 .75rem">${noPhoto} produto(s) sem foto neste aparelho. Peça ao escritório o <strong>pacote de imagens</strong> e abra em “Receber pacote”.</div>` : ''}
     <div class="home-actions">
-      <button type="button" class="btn ghost" data-action="open-pack">Receber pacote<small>planogramas do escritório</small></button>
+      <button type="button" class="btn ghost" data-action="open-pack">Receber pacote<small>planogramas ou imagens</small></button>
       <button type="button" class="btn" data-action="send-report" ${toSend ? '' : 'disabled'}>Enviar relatório<small>${toSend} execução(ões)</small></button>
     </div>
     <div class="filters">${filters
@@ -133,9 +139,17 @@ function showTask(id) {
   }
 }
 
-function productMap(t) {
-  return new Map(t.planogram.products.map((p) => [p.sku, p]));
+// Produtos do planograma com a foto resolvida pela biblioteca do aparelho
+// (pacotes antigos traziam a foto embutida em `image`).
+function productsOf(t) {
+  return t.planogram.products.map((p) => (p.imageKey && images[p.imageKey] ? { ...p, image: images[p.imageKey] } : p));
 }
+
+function productMap(t) {
+  return new Map(productsOf(t).map((p) => [p.sku, p]));
+}
+
+const missingPhotos = (list) => missingImageKeys(list.map((t) => t.planogram), new Set(Object.keys(images))).length;
 
 function matches(product, query) {
   if (!query) return false;
@@ -193,7 +207,7 @@ function renderTask(t) {
         <button type="button" class="icon-btn" data-zoom="-1" aria-label="Diminuir">−</button>
         <button type="button" class="icon-btn" data-zoom="1" aria-label="Aumentar">+</button>
       </div>
-      <div class="card drawing" id="drawing">${renderPlanogram({ ...p, blocks: [] }, p.products, {
+      <div class="card drawing" id="drawing">${renderPlanogram({ ...p, blocks: [] }, productsOf(t), {
         rules: {},
         colorBy: 'brand',
         checks: t.checks,
@@ -364,7 +378,19 @@ async function onSheetClick(e) {
 
 async function importPack(file) {
   try {
-    const pack = parsePack(await readJsonFile(file));
+    const data = await readJsonFile(file);
+    if (packKind(data) === 'images') {
+      const received = parseImagePack(data);
+      images = { ...images, ...received };
+      // guarda só as fotos que algum planograma do aparelho usa
+      const used = new Set(tasks.flatMap((t) => t.planogram.products.map((p) => p.imageKey)));
+      images = Object.fromEntries(Object.entries(images).filter(([k]) => used.has(k) || received[k]));
+      await store.set('field.images', images);
+      toast(`${Object.keys(received).length} foto(s) de produto recebida(s).`);
+      route();
+      return;
+    }
+    const pack = parsePack(data);
     const out = applyPack(tasks, pack);
     tasks = out.tasks;
     await persist();
@@ -519,6 +545,7 @@ function wire() {
 }
 
 tasks = await store.get('field.tasks', []);
+images = await store.get('field.images', {});
 settings = { ...settings, ...(await store.get('field.settings', {})) };
 wire();
 route();

@@ -95,13 +95,36 @@
           <div><span class="eyebrow">Cadastro</span><h1>Biblioteca de produtos</h1></div>
           <div class="actions">
             <button type="button" class="btn ghost" id="add-product">+ Produto</button>
-            <label class="btn ghost file-label">Importar CSV<input type="file" id="import-products" accept=".csv,text/csv" hidden /></label>
-            <button type="button" class="btn ghost" id="export-products">Exportar CSV</button>
+            <button type="button" class="btn ghost" id="export-products">Exportar planilha (modelo)</button>
           </div>
         </div>
+
+        <div class="import-grid">
+          <div class="card page-card import-step">
+            <span class="step-n">1</span>
+            <h2>Planilha de cadastro e medidas</h2>
+            <p class="hint">CSV (no Excel: <em>Salvar como › CSV</em>). Colunas reconhecidas pelo nome: EAN/GTIN, SKU, Descrição, Marca, Subcategoria, Largura, Altura, Profundidade (cm; em mm se o cabeçalho disser “mm”), Venda semanal, Preço. Atualiza pelo EAN ou SKU sem apagar o resto.</p>
+            <label class="btn ghost file-label">Escolher planilha<input type="file" id="import-products" accept=".csv,text/csv" hidden /></label>
+          </div>
+          <div class="card page-card import-step">
+            <span class="step-n">2</span>
+            <h2>Pasta de imagens</h2>
+            <p class="hint">Uma foto de frente por produto, com o EAN no nome do arquivo (<code>7891000100103.png</code>, <code>7891000100103_frente.jpg</code>) ou o SKU. Fotos de lado/topo são ignoradas. Bordas brancas são cortadas automaticamente.</p>
+            <div class="row-actions">
+              <label class="btn ghost file-label">Escolher pasta<input type="file" id="import-folder" webkitdirectory multiple hidden /></label>
+              <label class="btn ghost file-label">Escolher imagens<input type="file" id="import-images" accept="image/*" multiple hidden /></label>
+            </div>
+          </div>
+          <div class="dropzone" id="dropzone">
+            <strong>Arraste aqui</strong>
+            <span class="hint">a pasta de imagens ou a planilha CSV</span>
+          </div>
+        </div>
+        <div id="import-review" class="card page-card" hidden></div>
+
         <div class="card page-card">
           <p class="hint" id="product-count"></p>
-          <p class="hint">Medidas da embalagem vista de frente (largura × altura × profundidade, em cm) e venda média semanal. A foto aparece no planograma e no app do promotor. O CSV aceita “;” ou “,” e o mesmo cabeçalho da exportação.</p>
+          <p class="hint">Medidas da embalagem vista de frente (largura × altura × profundidade, em cm). A foto aparece no planograma e no app do promotor; o selo “proporção” indica foto que não combina com as medidas.</p>
           <div class="table-wrap"><table id="products-table" class="edit-table"><thead></thead><tbody></tbody></table></div>
         </div>
       </section>
@@ -133,9 +156,11 @@
           <div><span class="eyebrow">Lojas e promotores</span><h1>Execução</h1></div>
           <div class="actions">
             <label class="btn ghost file-label">Importar relatório do promotor<input type="file" id="import-report" accept=".json,application/json" hidden /></label>
+            <button type="button" class="btn ghost" id="download-images">Baixar imagens para o app</button>
             <button type="button" class="btn" id="download-pack">Baixar pacote para o app</button>
           </div>
         </div>
+        <p class="hint" id="images-info" style="margin:-.5rem 0 1rem;text-align:right"></p>
         <div id="exec-kpis" class="kpis wide"></div>
         <div class="card page-card">
           <h2 style="font-size:1rem">Publicar planogramas</h2>

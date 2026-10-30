@@ -1,13 +1,18 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { ean13, sampleCategory, sampleFixture, sampleProducts, sampleRules, sampleStores } from '../src/data.js';
+import { ean13 } from '../src/catalog.js';
+import { sampleCategory, sampleFixture, sampleProducts, sampleRules, sampleStores } from '../src/data.js';
 import { generatePlanogram, localizeInputs } from '../src/engine.js';
 import {
   applyPack,
   compliance,
   makePack,
+  makeImagePack,
   makeReport,
+  missingImageKeys,
+  packKind,
+  parseImagePack,
   mergeReports,
   parsePack,
   parseReport,
@@ -100,4 +105,21 @@ test('relatório leva SKU e prateleira de cada conferência', () => {
     { sku: report.tasks[0].checks[pos.id].sku, shelf: report.tasks[0].checks[pos.id].shelf },
     { sku: pos.sku, shelf: pos.shelf },
   );
+});
+
+test('pacote de imagens é separado; planograma leva só a chave', () => {
+  const store = sampleStores[0];
+  const products = sampleProducts.map((p, i) => (i === 0 ? { ...p, imageKey: 'k1', image: 'data:image/webp;base64,AA' } : p));
+  const plan = generatePlanogram({ products, fixture: sampleFixture, rules: sampleRules });
+  const pub = publishPlanogram({ store, category: sampleCategory, plan, products, version: 1 });
+  const first = pub.products.find((p) => p.sku === sampleProducts[0].sku);
+  assert.equal(first.imageKey, 'k1');
+  assert.equal(first.image, undefined, 'a foto não vai embutida no pacote de planogramas');
+  assert.deepEqual(missingImageKeys([pub], new Set()), ['k1']);
+  assert.deepEqual(missingImageKeys([pub], new Set(['k1'])), []);
+  const images = parseImagePack(roundTrip(makeImagePack({ k1: 'data:image/webp;base64,AA', ruim: 'javascript:alert(1)' })));
+  assert.deepEqual(Object.keys(images), ['k1'], 'só aceita data:image');
+  assert.equal(packKind(makeImagePack({})), 'images');
+  assert.equal(packKind(makePack({ planograms: [] })), 'planograms');
+  assert.throws(() => packKind({ format: 'x' }), /não reconhecido/);
 });

@@ -1,10 +1,12 @@
 // Troca de arquivos entre escritório e promotor (funciona sem servidor e sem internet):
 //   escritório -> pacote (.json) com planogramas por loja, produtos e revisões
+//   escritório -> pacote de imagens (.json), enviado à parte: as fotos pesam e mudam pouco
 //   promotor   -> relatório (.json) com conferência, fotos e tempos de execução
 // O arquivo vai por WhatsApp, e-mail, Drive ou cabo; o app guarda tudo no aparelho.
 
 export const PACK_FORMAT = 'planogram-pack/v1';
 export const REPORT_FORMAT = 'planogram-report/v1';
+export const IMAGES_FORMAT = 'planogram-images/v1';
 
 export const STATUS = {
   novo: 'Novo',
@@ -24,7 +26,8 @@ export const ISSUES = {
 
 export const planogramId = (storeId, category) => `${storeId}::${category}`;
 
-// Um planograma publicado é autocontido: leva os produtos que usa (com imagem).
+// Um planograma publicado leva os produtos que usa; a foto vai só como chave (imageKey),
+// resolvida no aparelho pelo pacote de imagens.
 export function publishPlanogram({ store, category, plan, products, version, note = '', timeTracking = true }) {
   const used = new Set(plan.positions.map((p) => p.sku));
   return {
@@ -43,14 +46,42 @@ export function publishPlanogram({ store, category, plan, products, version, not
     })),
     products: products
       .filter((p) => used.has(p.sku))
-      .map(({ sku, ean, name, brand, subcategory, width, height, depth, price, image }) => ({
-        sku, ean, name, brand, subcategory, width, height, depth, price, image,
+      .map(({ sku, ean, name, brand, subcategory, width, height, depth, price, imageKey }) => ({
+        sku, ean, name, brand, subcategory, width, height, depth, price, imageKey: imageKey ?? '',
       })),
   };
 }
 
 export function makePack({ planograms, reviews = {}, from = 'Escritório' }) {
   return { format: PACK_FORMAT, createdAt: new Date().toISOString(), from, planograms, reviews };
+}
+
+export function makeImagePack(images) {
+  return { format: IMAGES_FORMAT, createdAt: new Date().toISOString(), images };
+}
+
+export function parseImagePack(data) {
+  if (data?.format !== IMAGES_FORMAT || typeof data.images !== 'object' || data.images === null) {
+    throw new Error('Este arquivo não é um pacote de imagens.');
+  }
+  const images = {};
+  for (const [key, url] of Object.entries(data.images)) {
+    if (typeof url === 'string' && url.startsWith('data:image/')) images[key] = url;
+  }
+  return images;
+}
+
+// O app do promotor recebe os dois tipos de arquivo pelo mesmo botão.
+export function packKind(data) {
+  if (data?.format === PACK_FORMAT) return 'planograms';
+  if (data?.format === IMAGES_FORMAT) return 'images';
+  throw new Error('Arquivo não reconhecido: use o pacote de planogramas ou de imagens do escritório.');
+}
+
+// Chaves de imagem que os planogramas usam e o aparelho ainda não tem.
+export function missingImageKeys(planograms, available) {
+  const keys = new Set(planograms.flatMap((p) => p.products.map((x) => x.imageKey).filter(Boolean)));
+  return [...keys].filter((k) => !available.has(k));
 }
 
 export function parsePack(data) {

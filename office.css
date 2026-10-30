@@ -668,3 +668,91 @@ tr.is-selected td {
     padding: 1rem;
   }
 }
+
+/* importação de cadastro e imagens */
+.import-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr minmax(200px, 0.7fr);
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.import-step {
+  position: relative;
+  padding-left: 3.4rem;
+}
+
+.import-step h2 {
+  font-size: 0.95rem;
+}
+
+.import-step .btn,
+.import-step .row-actions {
+  margin-top: 0.75rem;
+}
+
+.import-step code {
+  font-size: 0.75rem;
+  background: var(--line-2);
+  padding: 0.05rem 0.3rem;
+  border-radius: 4px;
+}
+
+.step-n {
+  position: absolute;
+  left: 1.1rem;
+  top: 1rem;
+  display: grid;
+  place-items: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  border-radius: 999px;
+  background: var(--primary);
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.8rem;
+}
+
+.dropzone {
+  border: 2px dashed #cbd5e1;
+  border-radius: var(--radius);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 1rem;
+  color: var(--primary);
+  background: var(--card);
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.dropzone.over {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+}
+
+#import-review {
+  margin-bottom: 1rem;
+  border-color: var(--primary);
+}
+
+.review-table td {
+  vertical-align: middle;
+}
+
+.thumb.lg {
+  width: 3.2rem;
+  height: 3.2rem;
+}
+
+.section-h {
+  font-size: 0.85rem;
+  margin: 1rem 0 0.4rem;
+}
+
+@media (max-width: 1100px) {
+  .import-grid {
+    grid-template-columns: 1fr;
+  }
+}

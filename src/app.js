@@ -1,14 +1,16 @@
 // Escritório: planejamento, lojas, publicação para o app do promotor e revisão da execução.
 
+import { imageKeyFor, matchImages, mergeProducts, parseProductRecords, ratioCheck } from './catalog.js';
 import { parseCsv, toCsv } from './csv.js';
 import { PRODUCT_FIELDS, sampleCategory, sampleFixture, sampleProducts, sampleRules, sampleStores } from './data.js';
 import { fixtureWidth, generatePlanogram, localizeInputs, makePosition, unitsDeep, unitsHigh } from './engine.js';
-import { compressImage, readJsonFile, saveFile } from './files.js';
+import { filesFromDrop, isImageFile, processProductImage, readJsonFile, saveFile } from './files.js';
 import { evaluate } from './metrics.js';
 import {
   ISSUES,
   STATUS,
   formatDuration,
+  makeImagePack,
   makePack,
   mergeReports,
   parseReport,
@@ -64,11 +66,21 @@ async function load() {
     }
   }
   if (saved) state = { ...defaults(), ...saved, batch: null };
-  // projetos antigos não tinham EAN nem foto
+  images = (await store.get('office.images')) ?? {};
+  // projetos antigos: sem EAN, ou com a foto embutida no produto
+  let migrated = false;
   for (const p of state.products) {
     p.ean ??= '';
-    p.image ??= '';
+    p.imageKey ??= '';
+    if (p.image) {
+      const key = imageKeyFor(p, p.image);
+      images[key] = { url: p.image, w: 0, h: 0 };
+      p.imageKey = key;
+      migrated = true;
+    }
+    delete p.image;
   }
+  if (migrated) await saveImages();
   reports = (await store.get('office.reports')) ?? {};
 }
 
@@ -386,7 +398,7 @@ function wireConfig() {
 // ---------- planograma ----------
 
 function renderPlanogramTab() {
-  const products = localInputs().products;
+  const products = withImages(localInputs().products);
   const plan = state.planogram;
   const evaluation = evaluate(plan, products, state.rules);
   const st = currentStore();
@@ -511,27 +523,189 @@ function renderInspector(evaluation, products) {
     </div>`;
 }
 
-// ---------- produtos ----------
+// ---------- produtos e imagens ----------
+
+// Biblioteca de imagens: chave -> { url, w, h }. Fica fora do estado para o
+// salvamento automático não regravar megabytes de fotos a cada clique.
+let images = {};
+
+async function saveImages() {
+  await store.set('office.images', images).catch(() => toast('Não foi possível salvar as imagens no navegador.'));
+}
+
+const withImages = (products) =>
+  products.map((p) => (p.imageKey && images[p.imageKey] ? { ...p, image: images[p.imageKey].url } : p));
+
+function setProductImage(product, processed) {
+  const key = imageKeyFor(product, processed.dataUrl);
+  images[key] = { url: processed.dataUrl, w: processed.width, h: processed.height };
+  product.imageKey = key;
+}
+
+// Remove da biblioteca as imagens que nenhum produto usa mais.
+function pruneImages() {
+  const used = new Set(state.products.map((p) => p.imageKey).filter(Boolean));
+  for (const key of Object.keys(images)) if (!used.has(key)) delete images[key];
+}
+
+function ratioBadge(p) {
+  const img = images[p.imageKey];
+  if (!img) return '';
+  const r = ratioCheck(p, img.w, img.h);
+  if (r.level === 'ok' || r.level === 'unknown') return '';
+  return `<span class="chip ${r.level === 'bad' ? 'devolvido' : 'em_execucao'}" title="${esc(r.text)}">proporção</span>`;
+}
 
 function renderProductsTab() {
   $('#products-table thead').innerHTML =
     `<tr><th>Ativo</th><th>Foto</th>${PRODUCT_FIELDS.map(([, l]) => `<th>${l}</th>`).join('')}<th></th></tr>`;
   $('#products-table tbody').innerHTML = state.products
-    .map(
-      (p, i) => `<tr>
+    .map((p, i) => {
+      const img = images[p.imageKey];
+      return `<tr>
       <td><input type="checkbox" data-row="${i}" data-field="active" ${p.active !== false ? 'checked' : ''} aria-label="Ativo"></td>
-      <td><div class="thumb-cell">${p.image ? `<img class="thumb" src="${esc(p.image)}" alt="">` : '<span class="thumb"></span>'}
-        <label class="link file-label">${p.image ? 'trocar' : 'enviar'}<input type="file" accept="image/*" data-image="${i}" hidden></label>
-        ${p.image ? `<button type="button" class="link danger" data-action="remove-image" data-row="${i}">×</button>` : ''}</div></td>
+      <td><div class="thumb-cell">${img ? `<img class="thumb" src="${esc(img.url)}" alt="">` : '<span class="thumb"></span>'}
+        <label class="link file-label">${img ? 'trocar' : 'enviar'}<input type="file" accept="image/*" data-image="${i}" hidden></label>
+        ${img ? `<button type="button" class="link danger" data-action="remove-image" data-row="${i}" aria-label="Remover foto">×</button>` : ''}
+        ${ratioBadge(p)}</div></td>
       ${PRODUCT_FIELDS.map(
         ([key, label, type]) =>
           `<td class="${key}"><input type="${type}" ${type === 'number' ? 'step="any" min="0"' : ''} data-row="${i}" data-field="${key}" value="${esc(p[key])}" aria-label="${label}"></td>`,
       ).join('')}
       <td><button type="button" class="link danger" data-action="delete-product" data-row="${i}">excluir</button></td>
-    </tr>`,
-    )
+    </tr>`;
+    })
     .join('');
-  $('#product-count').textContent = `${state.products.length} produtos · ${state.products.filter((p) => p.active !== false).length} ativos`;
+  const withImg = state.products.filter((p) => images[p.imageKey]).length;
+  $('#product-count').textContent =
+    `${state.products.length} produtos · ${state.products.filter((p) => p.active !== false).length} ativos · ${withImg} com foto`;
+  renderImport();
+}
+
+// ----- conferência de importação (imagens e planilha) -----
+
+let pending = null; // { kind: 'progress' | 'images' | 'sheet', ... }
+
+const ratioCell = (m, i) => {
+  if (m.ratio.level === 'ok') return '<span class="chip aprovado">ok</span>';
+  if (m.ratio.level === 'unknown') return '<span class="chip">sem medida</span>';
+  return `<span class="chip ${m.ratio.level === 'bad' ? 'devolvido' : 'em_execucao'}">${m.ratio.level === 'bad' ? 'confira' : 'atenção'}</span>
+    <small style="display:block">${esc(m.ratio.text)}</small>
+    ${m.ratio.rotated ? `<button type="button" class="link" data-swap="${i}">trocar largura ↔ altura</button>` : ''}`;
+};
+
+function renderImport() {
+  const box = $('#import-review');
+  if (!pending) {
+    box.hidden = true;
+    return;
+  }
+  box.hidden = false;
+  if (pending.kind === 'progress') {
+    box.innerHTML = `<p><strong>Processando imagens ${pending.done}/${pending.total}…</strong></p>
+      <div class="bar"><i class="space" style="width:${(pending.done / Math.max(1, pending.total)) * 100}%"></i></div>`;
+    return;
+  }
+  if (pending.kind === 'sheet') {
+    const { summary, errors, columns, products } = pending;
+    const found = Object.values(columns)
+      .map((c) => `${esc(c.header)}${c.scale === 0.1 ? ' (mm→cm)' : c.scale === 100 ? ' (m→cm)' : ''}`)
+      .join(', ');
+    box.innerHTML = `
+      <div class="page-title" style="margin-bottom:.5rem"><div><span class="eyebrow">Conferência da planilha</span>
+        <h1 style="font-size:1.1rem">${summary.updated} atualizado(s) · ${summary.added} novo(s)</h1></div>
+        <div class="actions"><button type="button" class="btn ghost" data-import="cancel">Cancelar</button>
+        <button type="button" class="btn" data-import="apply-sheet">Aplicar</button></div></div>
+      <p class="hint">Colunas reconhecidas: ${found || 'nenhuma'}. Produtos já cadastrados são encontrados pelo EAN (ou SKU); campos vazios na planilha não apagam o que existe.</p>
+      ${summary.incomplete.length ? `<p class="hint" style="color:var(--warn)">${summary.incomplete.length} produto(s) novo(s) sem largura, altura ou profundidade: entram desativados até completar as medidas.</p>` : ''}
+      ${errors.length ? `<h2 class="section-h">Problemas (${errors.length})</h2><ul class="list issues">${errors.slice(0, 200).map((e) => `<li class="warn">Linha ${e.line}: ${esc(e.text)}</li>`).join('')}</ul>` : ''}
+      <p class="hint">Total depois de aplicar: ${products.length} produtos.</p>`;
+    return;
+  }
+  const { matched, unknown, missing } = pending;
+  const flagged = matched.filter((m) => m.ratio.level === 'bad' || m.ratio.level === 'warn').length;
+  const chosen = matched.filter((m) => m.use).length;
+  box.innerHTML = `
+    <div class="page-title" style="margin-bottom:.5rem"><div><span class="eyebrow">Conferência das imagens</span>
+      <h1 style="font-size:1.1rem">${matched.length} associada(s) · ${flagged} com alerta · ${unknown.length} não reconhecida(s)</h1></div>
+      <div class="actions"><button type="button" class="btn ghost" data-import="cancel">Cancelar</button>
+      <button type="button" class="btn" data-import="apply-images" ${chosen ? '' : 'disabled'}>Aplicar ${chosen} imagem(ns)</button></div></div>
+    <p class="hint">O nome do arquivo identifica o produto: EAN (ex.: 7891000100103.png ou 7891000100103_frente.jpg) ou o SKU. Bordas brancas ou transparentes foram cortadas. O alerta compara a proporção da foto com largura × altura cadastradas; as marcadas “confira” ficam desmarcadas.</p>
+    ${
+      matched.length
+        ? `<div class="table-wrap"><table class="review-table"><thead><tr><th></th><th>Foto</th><th>Produto</th><th>Arquivo</th><th>L × A (cm)</th><th>Proporção</th></tr></thead><tbody>${matched
+            .map(
+              (m, i) => `<tr>
+          <td><input type="checkbox" data-use="${i}" ${m.use ? 'checked' : ''} aria-label="Usar esta imagem"></td>
+          <td><img class="thumb lg" src="${esc(m.processed.dataUrl)}" alt=""></td>
+          <td><strong>${esc(m.product.name)}</strong><small class="muted" style="display:block">EAN ${esc(m.product.ean || '—')} · SKU ${esc(m.product.sku)}${m.product.imageKey ? ' · substitui a foto atual' : ''}</small></td>
+          <td><small>${esc(m.file.name)}${m.extra.length ? `<br><span class="muted">+${m.extra.length} outra(s) ignorada(s)</span>` : ''}</small></td>
+          <td>${m.product.width} × ${m.product.height}${m.swapped ? ' <small class="muted">(trocado)</small>' : ''}</td>
+          <td>${ratioCell(m, i)}</td></tr>`,
+            )
+            .join('')}</tbody></table></div>`
+        : ''
+    }
+    ${unknown.length ? `<h2 class="section-h">Não reconhecidas (${unknown.length})</h2><ul class="list issues">${unknown.map((u) => `<li class="warn"><div><strong>${esc(u.file.name)}</strong><small>${esc(u.reason)}</small></div></li>`).join('')}</ul>` : ''}
+    ${missing.length ? `<details style="margin-top:.75rem"><summary class="hint">${missing.length} produto(s) ativo(s) continuam sem foto</summary><ul class="list">${missing.map((p) => `<li>${esc(p.name)}<small>EAN ${esc(p.ean || '—')}</small></li>`).join('')}</ul></details>` : ''}`;
+}
+
+async function importImageFiles(files) {
+  const list = files.filter(isImageFile);
+  if (list.length === 0) {
+    toast('Nenhuma imagem encontrada (PNG, JPG ou WebP).');
+    return;
+  }
+  const { matched, unknown, missing } = matchImages(list, state.products);
+  pending = { kind: 'progress', done: 0, total: matched.length };
+  renderImport();
+  const ok = [];
+  for (const m of matched) {
+    try {
+      const processed = await processProductImage(m.file);
+      const ratio = ratioCheck(m.product, processed.width, processed.height);
+      ok.push({ ...m, processed, ratio, use: ratio.level !== 'bad' });
+    } catch (err) {
+      unknown.push({ file: m.file, reason: err.message });
+    }
+    pending.done++;
+    if (pending.done % 5 === 0 || pending.done === pending.total) renderImport();
+  }
+  pending = { kind: 'images', matched: ok, unknown, missing };
+  renderImport();
+  $('#import-review').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+async function importSheet(file) {
+  const { rows, errors, columns } = parseProductRecords(parseCsv(await file.text()));
+  if (!columns.sku && !columns.ean) {
+    toast('A planilha precisa de uma coluna de EAN ou SKU (veja o modelo exportado).');
+    return;
+  }
+  const { products, summary } = mergeProducts(state.products, rows);
+  pending = { kind: 'sheet', products, summary, errors, columns };
+  renderImport();
+  $('#import-review').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+async function applyPending(kind) {
+  if (kind === 'sheet') {
+    state.products = pending.products;
+    toast(`Planilha aplicada: ${pending.summary.updated} atualizado(s), ${pending.summary.added} novo(s).`);
+  } else {
+    const chosen = pending.matched.filter((m) => m.use);
+    for (const m of chosen) {
+      const product = state.products.find((p) => p.sku === m.product.sku);
+      if (m.swapped) [product.width, product.height] = [m.product.width, m.product.height];
+      setProductImage(product, m.processed);
+    }
+    pruneImages();
+    await saveImages();
+    toast(`${chosen.length} imagem(ns) aplicada(s).`);
+  }
+  pending = null;
+  renderProductsTab();
+  inputsChanged();
 }
 
 function wireProducts() {
@@ -541,7 +715,9 @@ function wireProducts() {
       const file = e.target.files[0];
       if (!file) return;
       try {
-        state.products[Number(e.target.dataset.image)].image = await compressImage(file, 320, 0.82);
+        setProductImage(state.products[Number(e.target.dataset.image)], await processProductImage(file));
+        pruneImages();
+        await saveImages();
         renderProductsTab();
         inputsChanged();
       } catch (err) {
@@ -565,11 +741,13 @@ function wireProducts() {
     } else p[field] = e.target.value.trim();
     inputsChanged();
   });
-  table.addEventListener('click', (e) => {
+  table.addEventListener('click', async (e) => {
     const { action, row } = e.target.dataset;
     if (action === 'delete-product') state.products.splice(Number(row), 1);
-    else if (action === 'remove-image') state.products[Number(row)].image = '';
+    else if (action === 'remove-image') state.products[Number(row)].imageKey = '';
     else return;
+    pruneImages();
+    await saveImages();
     renderProductsTab();
     inputsChanged();
   });
@@ -586,7 +764,7 @@ function wireProducts() {
       weeklyUnits: 10,
       price: 3,
       margin: 0.3,
-      image: '',
+      imageKey: '',
       active: true,
     });
     renderProductsTab();
@@ -596,26 +774,50 @@ function wireProducts() {
   $('#import-products').addEventListener('change', async (e) => {
     const file = e.target.files[0];
     e.target.value = '';
-    if (!file) return;
-    const records = parseCsv(await file.text());
-    const products = [];
-    for (const rec of records) {
-      const p = { active: true, image: '' };
-      for (const [key, label, type] of PRODUCT_FIELDS) {
-        const raw = rec[key] ?? rec[label] ?? '';
-        p[key] = type === 'number' ? Number(String(raw).replace(',', '.')) : raw;
-      }
-      if (!p.sku || !(p.width > 0 && p.height > 0 && p.depth > 0)) continue;
-      products.push(p);
-    }
-    if (products.length === 0) {
-      toast('Nenhum produto válido no CSV. Use o cabeçalho exportado.');
+    if (file) importSheet(file);
+  });
+  for (const id of ['#import-images', '#import-folder']) {
+    $(id).addEventListener('change', (e) => {
+      const files = [...e.target.files];
+      e.target.value = '';
+      importImageFiles(files);
+    });
+  }
+  const drop = $('#dropzone');
+  drop.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    drop.classList.add('over');
+  });
+  drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+  drop.addEventListener('drop', async (e) => {
+    e.preventDefault();
+    drop.classList.remove('over');
+    const files = await filesFromDrop(e.dataTransfer);
+    const sheet = files.find((f) => /\.csv$/i.test(f.name));
+    if (sheet) await importSheet(sheet);
+    else importImageFiles(files);
+  });
+  $('#import-review').addEventListener('click', (e) => {
+    const t = e.target.closest('[data-import], [data-swap]');
+    if (!t) return;
+    if (t.dataset.swap) {
+      const m = pending.matched[Number(t.dataset.swap)];
+      m.product = { ...m.product, width: m.product.height, height: m.product.width };
+      m.swapped = true;
+      m.ratio = ratioCheck(m.product, m.processed.width, m.processed.height);
+      m.use = true;
+      renderImport();
       return;
     }
-    state.products = products;
-    toast(`${products.length} produtos importados (${records.length - products.length} linhas ignoradas).`);
-    renderProductsTab();
-    inputsChanged();
+    if (t.dataset.import === 'cancel') {
+      pending = null;
+      renderImport();
+    } else applyPending(t.dataset.import === 'apply-sheet' ? 'sheet' : 'images');
+  });
+  $('#import-review').addEventListener('change', (e) => {
+    if (e.target.dataset.use === undefined) return;
+    pending.matched[Number(e.target.dataset.use)].use = e.target.checked;
+    renderImport();
   });
 }
 
@@ -744,6 +946,27 @@ function downloadPack() {
   saveFile(`pacote-planogramas-v${state.published.version}-${day}.json`, JSON.stringify(pack));
 }
 
+// Só as fotos dos produtos publicados; vai à parte porque pesa e muda pouco.
+function publishedImages() {
+  const keys = new Set((state.published?.planograms ?? []).flatMap((p) => p.products.map((x) => x.imageKey).filter(Boolean)));
+  return Object.fromEntries([...keys].filter((k) => images[k]).map((k) => [k, images[k].url]));
+}
+
+function downloadImagePack() {
+  const selected = publishedImages();
+  if (Object.keys(selected).length === 0) {
+    toast(state.published ? 'Os produtos publicados não têm foto.' : 'Publique uma versão antes.');
+    return;
+  }
+  const day = new Date().toISOString().slice(0, 10);
+  saveFile(`pacote-imagens-${day}.json`, JSON.stringify(makeImagePack(selected)));
+}
+
+const fileSize = (chars) =>
+  chars < 1024 * 1024
+    ? `${Math.max(1, Math.round(chars / 1024))} KB`
+    : `${(chars / 1024 / 1024).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} MB`;
+
 function execRows() {
   const planograms = state.published?.planograms ?? [];
   return planograms.map((p) => {
@@ -761,6 +984,13 @@ function renderExecutionTab() {
   const pub = state.published;
   $('#publish-info').textContent = pub ? `Versão atual: ${pub.version} · ${dateTime(pub.publishedAt)}` : 'Nada publicado ainda.';
   $('#download-pack').disabled = !pub;
+  const imgs = pub ? Object.values(publishedImages()) : [];
+  $('#download-images').disabled = imgs.length === 0;
+  $('#images-info').textContent = !pub
+    ? ''
+    : imgs.length
+      ? `${imgs.length} foto(s), cerca de ${fileSize(imgs.reduce((a, u) => a + u.length, 0))}. Envie de novo só quando as fotos mudarem.`
+      : 'Os produtos publicados ainda não têm foto (aba Produtos › Importar imagens).';
 
   const done = rows.filter((r) => r.report && r.report.status === 'concluido' && r.status === 'concluido');
   const withReport = rows.filter((r) => r.report);
@@ -861,6 +1091,7 @@ function decide(id, status) {
 function wireExecution() {
   $('#publish').addEventListener('click', publish);
   $('#download-pack').addEventListener('click', downloadPack);
+  $('#download-images').addEventListener('click', downloadImagePack);
   $('#import-report').addEventListener('change', async (e) => {
     const file = e.target.files[0];
     e.target.value = '';
