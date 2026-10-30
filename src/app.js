@@ -1,13 +1,26 @@
 // Escritório: planejamento, lojas, publicação para o app do promotor e revisão da execução.
 
 import { imageKeyFor, matchImages, mergeProducts, parseProductRecords, ratioCheck } from './catalog.js';
+import { dailyChart } from './charts.js';
 import { parseCsv, toCsv } from './csv.js';
 import { PRODUCT_FIELDS, sampleCategory, sampleFixture, sampleProducts, sampleRules, sampleStores } from './data.js';
 import { fixtureWidth, generatePlanogram, localizeInputs, makePosition, unitsDeep, unitsHigh } from './engine.js';
 import { filesFromDrop, isImageFile, processProductImage, readJsonFile, saveFile } from './files.js';
+import {
+  CONNECTOR_TYPES,
+  buildRequest,
+  cosmosToProductRow,
+  describeHttp,
+  maskSecret,
+  newConnection,
+  proxyFetch,
+  salesFromJson,
+  validateConnection,
+} from './integrations.js';
 import { evaluate } from './metrics.js';
 import {
   ISSUES,
+  PHOTO_KINDS,
   STATUS,
   formatDuration,
   makeImagePack,
@@ -16,8 +29,10 @@ import {
   parseReport,
   planogramId,
   publishPlanogram,
+  viradaOf,
 } from './pack.js';
 import { esc, legendItems, renderPlanogram, shelfAt, slotIndex, toFixturePoint } from './render.js';
+import { addDays, compareTurnover, mergeSales, parseSalesRecords } from './sales.js';
 import * as store from './store.js';
 
 const LEGACY_KEY = 'planogram-builder:v1';
@@ -48,6 +63,7 @@ function defaults() {
     published: null,
     reviews: {},
     reviewId: null,
+    salesStoreId: null,
     batch: null,
   };
 }
@@ -82,6 +98,8 @@ async function load() {
   }
   if (migrated) await saveImages();
   reports = (await store.get('office.reports')) ?? {};
+  connections = (await store.get('office.connections')) ?? [];
+  sales = (await store.get('office.sales')) ?? {};
 }
 
 let saveTimer;
@@ -771,6 +789,7 @@ function wireProducts() {
     inputsChanged();
   });
   $('#export-products').addEventListener('click', () => saveFile('produtos.csv', toCsv(state.products, PRODUCT_FIELDS), 'text/csv'));
+  $('#complete-cosmos').addEventListener('click', completeFromCosmos);
   $('#import-products').addEventListener('change', async (e) => {
     const file = e.target.files[0];
     e.target.value = '';
@@ -841,13 +860,16 @@ function renderStoresTab() {
     .map(
       (s, i) => `<tr>
       <td><input type="text" data-store="${i}" data-field="name" value="${esc(s.name)}" aria-label="Nome"></td>
+      <td><input type="text" data-store="${i}" data-field="code" value="${esc(s.code ?? '')}" placeholder="ex.: 0101" aria-label="Código na base de vendas"></td>
       <td><input type="number" min="1" max="12" step="1" data-store="${i}" data-field="bayCount" value="${s.bayCount}" aria-label="Módulos"></td>
       <td><input type="text" data-store="${i}" data-field="salesIndex" value="${esc(formatIndex(s.salesIndex))}" placeholder="Recheado=1.2; Wafer=0.8" aria-label="Índice de venda"></td>
       <td><input type="text" data-store="${i}" data-field="delisted" value="${esc((s.delisted ?? []).join(', '))}" placeholder="SKUs fora do sortimento" aria-label="SKUs fora"></td>
-      <td><button type="button" class="link danger" data-action="delete-store" data-store="${i}">excluir</button></td>
+      <td class="nowrap"><button type="button" class="btn ${state.salesStoreId === s.id ? '' : 'ghost'} sm" data-action="sales" data-id="${esc(s.id)}">Vendas e virada</button>
+        <button type="button" class="link danger" data-action="delete-store" data-store="${i}">excluir</button></td>
     </tr>`,
     )
     .join('');
+  renderStoreSales();
 
   const b = state.batch;
   $('#batch').innerHTML = b
@@ -870,12 +892,19 @@ function wireStores() {
     if (field === 'bayCount') s.bayCount = Math.max(1, Math.round(Number(e.target.value) || 1));
     else if (field === 'salesIndex') s.salesIndex = parseIndex(e.target.value);
     else if (field === 'delisted') s.delisted = e.target.value.split(',').map((x) => x.trim()).filter(Boolean);
+    else if (field === 'code') s.code = e.target.value.trim();
     else s.name = e.target.value;
     state.batch = null;
     if (s.id === state.storeId) inputsChanged();
     else render();
   });
   $('#stores-table').addEventListener('click', (e) => {
+    if (e.target.dataset.action === 'sales') {
+      state.salesStoreId = state.salesStoreId === e.target.dataset.id ? null : e.target.dataset.id;
+      render();
+      if (state.salesStoreId) $('#store-sales').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
     if (e.target.dataset.action !== 'delete-store') return;
     const [removed] = state.stores.splice(Number(e.target.dataset.store), 1);
     state.batch = null;
@@ -972,10 +1001,9 @@ function execRows() {
   return planograms.map((p) => {
     const report = reports[p.id];
     const current = report && report.version === p.version ? report : null;
-    const review = state.reviews[p.id];
-    const reviewed = review && review.version === p.version && current && review.at >= (current.receivedAt ?? '');
-    const status = reviewed ? review.status : (current?.status ?? 'novo');
-    return { planogram: p, report: current, review, status };
+    const status = executionStatus(p.id, current);
+    const virada = current ? viradaOf({ status, photos: current.photos }) : null;
+    return { planogram: p, report: current, review: state.reviews[p.id], status, virada };
   });
 }
 
@@ -1010,7 +1038,7 @@ function renderExecutionTab() {
 
   $('#exec-table tbody').innerHTML = rows.length
     ? rows
-        .map(({ planogram: p, report: r, status }) => {
+        .map(({ planogram: p, report: r, status, virada }) => {
           const c = r?.compliance;
           return `<tr>
           <td><strong>${esc(p.storeName)}</strong></td><td>${esc(p.category)}</td><td>v${p.version}</td>
@@ -1018,10 +1046,11 @@ function renderExecutionTab() {
           <td>${c ? `${pct(c.rate)} <small class="muted">(${c.ok}/${c.total})</small>` : '—'}</td>
           <td>${c ? c.problems : '—'}</td><td>${r ? r.photos.length : '—'}</td>
           <td>${r ? formatDuration(r.durationMs) : '—'}</td><td>${r ? dateTime(r.receivedAt) : '—'}</td>
+          <td>${!virada ? '—' : virada.counted ? `<span class="chip aprovado">${virada.date.split('-').reverse().join('/')}</span>` : `<small class="muted">${virada.missing.length ? `falta foto do ${virada.missing.join(' e ')}` : 'não concluída'}</small>`}</td>
           <td>${r ? `<button type="button" class="btn ${status === 'concluido' ? '' : 'ghost'} sm" data-action="review" data-id="${esc(p.id)}">Revisar</button>` : ''}</td></tr>`;
         })
         .join('')
-    : '<tr><td colspan="10" class="muted">Publique uma versão para acompanhar a execução nas lojas.</td></tr>';
+    : '<tr><td colspan="11" class="muted">Publique uma versão para acompanhar a execução nas lojas.</td></tr>';
 
   renderReview(rows.find((r) => r.planogram.id === state.reviewId));
 }
@@ -1050,8 +1079,14 @@ function renderReview(row) {
     <p class="hint">Início ${dateTime(r.startedAt)} · fim ${dateTime(r.finishedAt)} · ${formatDuration(r.durationMs)} · ${r.device ? esc(r.device) : 'aparelho não identificado'}</p>
     <div class="split">
       <div>
-        <h2 style="font-size:.9rem">Fotos (${r.photos.length})</h2>
-        <div class="gallery">${r.photos.map((ph) => `<img src="${esc(ph.dataUrl)}" alt="Foto da execução" data-zoom-img>`).join('') || '<p class="hint">Sem fotos.</p>'}</div>
+        ${[...Object.entries(PHOTO_KINDS), ['', 'Outras']]
+          .map(([kind, label]) => {
+            const list = r.photos.filter((ph) => (ph.kind ?? '') === kind);
+            if (!kind && !list.length) return '';
+            return `<h2 style="font-size:.9rem">${label} (${list.length})</h2>
+              <div class="gallery">${list.map((ph) => `<img src="${esc(ph.dataUrl)}" alt="Foto ${label.toLowerCase()}" data-zoom-img>`).join('') || '<p class="hint">Sem foto.</p>'}</div>`;
+          })
+          .join('')}
         ${r.comment ? `<p><strong>Comentário do promotor:</strong> ${esc(r.comment)}</p>` : ''}
       </div>
       <div>
@@ -1123,6 +1158,368 @@ function wireExecution() {
   $('#lightbox').addEventListener('click', () => ($('#lightbox').hidden = true));
 }
 
+// ---------- integrações (chaves de API) ----------
+
+// Ficam só neste navegador, fora do estado do projeto: não vão no "Salvar projeto",
+// nos pacotes para o app nem no histórico do Git.
+let connections = [];
+
+async function saveConnections() {
+  await store.set('office.connections', connections).catch(() => toast('Não foi possível salvar as conexões.'));
+}
+
+const connectionsOf = (type) => connections.filter((c) => c.type === type);
+
+function renderIntegrationsTab() {
+  $('#connections').innerHTML = connections.length
+    ? connections
+        .map((c) => {
+          const def = CONNECTOR_TYPES[c.type];
+          return `<div class="card page-card connection" data-conn="${esc(c.id)}">
+        <div class="page-title" style="margin-bottom:.5rem"><div><span class="eyebrow">${esc(def.label)}</span>
+          <h1 style="font-size:1.05rem"><input type="text" class="title-input" data-cfield="name" value="${esc(c.name)}" aria-label="Nome da conexão"></h1></div>
+          <div class="actions">${c.status ? `<span class="chip ${c.status.ok ? 'aprovado' : 'devolvido'}" title="${esc(dateTime(c.status.at))}">${esc(c.status.text)}</span>` : ''}
+            <button type="button" class="btn ghost sm" data-caction="test">Testar conexão</button>
+            <button type="button" class="link danger" data-caction="remove">remover</button></div></div>
+        <p class="hint">${esc(def.purpose)}${def.docs ? ` <a href="${def.docs}" target="_blank" rel="noopener">Documentação</a>` : ''}</p>
+        <div class="grid3">${def.fields
+          .map(
+            (f) => `<label class="field"><span>${esc(f.label)}</span>${
+              f.secret
+                ? `<input type="password" autocomplete="off" data-cfield="${f.key}" placeholder="${c[f.key] ? `salva: ${maskSecret(c[f.key])}` : 'cole a chave aqui'}">`
+                : `<input type="text" data-cfield="${f.key}" value="${esc(c[f.key])}" placeholder="${esc(f.placeholder ?? '')}">`
+            }</label>`,
+          )
+          .join('')}</div>
+        ${c.status?.detail ? `<pre class="probe">${esc(c.status.detail)}</pre>` : ''}
+      </div>`;
+        })
+        .join('')
+    : '<div class="card page-card"><p class="hint">Nenhuma conexão. Escolha a plataforma acima e informe a chave.</p></div>';
+}
+
+async function testConnection(conn) {
+  const problems = validateConnection(conn);
+  if (problems.length) {
+    conn.status = { ok: false, text: 'incompleta', detail: problems.join('\n'), at: new Date().toISOString() };
+    return;
+  }
+  let vars = {};
+  if (conn.type === 'cosmos') vars = { gtin: state.products.find((p) => p.ean)?.ean ?? '7891000100103' };
+  if (conn.type === 'sales') {
+    const st = state.stores[0];
+    const today = new Date().toISOString().slice(0, 10);
+    vars = { loja: st?.code || st?.id || '', inicio: addDays(today, -7), fim: today };
+  }
+  try {
+    const res = await proxyFetch(buildRequest(conn, vars));
+    let ok = res.status >= 200 && res.status < 300;
+    let text = describeHttp(res.status);
+    let detail = res.body.slice(0, 400);
+    if (conn.type === 'cosmos' && res.status === 404) {
+      ok = true; // chave aceita; só o EAN de teste não existe na base
+      text = 'conectado';
+    }
+    if (conn.type === 'sales' && ok) {
+      const { rows, errors } = salesFromJson(JSON.parse(res.body), conn, 'teste');
+      text = `${rows.length} venda(s) lidas`;
+      detail = errors.length ? errors.slice(0, 5).map((e) => e.text).join('\n') : rows[0] ? JSON.stringify(rows[0]) : 'Nenhum item no período de teste.';
+    }
+    conn.status = { ok, text, detail, at: new Date().toISOString() };
+  } catch (err) {
+    conn.status = { ok: false, text: 'falhou', detail: err.message, at: new Date().toISOString() };
+  }
+}
+
+function wireIntegrations() {
+  $('#add-connection').addEventListener('click', async () => {
+    connections.push(newConnection($('#connection-type').value));
+    await saveConnections();
+    render();
+  });
+  $('#connections').addEventListener('change', async (e) => {
+    const card = e.target.closest('[data-conn]');
+    const key = e.target.dataset.cfield;
+    if (!card || !key) return;
+    const conn = connections.find((c) => c.id === card.dataset.conn);
+    const value = e.target.value.trim();
+    if (e.target.type === 'password' && !value) return; // campo vazio mantém a chave salva
+    conn[key] = value;
+    conn.status = null;
+    await saveConnections();
+    render();
+  });
+  $('#connections').addEventListener('click', async (e) => {
+    const card = e.target.closest('[data-conn]');
+    const action = e.target.dataset.caction;
+    if (!card || !action) return;
+    const conn = connections.find((c) => c.id === card.dataset.conn);
+    if (action === 'remove') {
+      if (!confirm(`Remover a conexão “${conn.name}” e a chave salva?`)) return;
+      connections = connections.filter((c) => c !== conn);
+    } else if (action === 'test') {
+      e.target.disabled = true;
+      e.target.textContent = 'Testando…';
+      await testConnection(conn);
+    }
+    await saveConnections();
+    render();
+  });
+}
+
+// Produtos: completa pelo Cosmos só o que falta (nome, marca, medidas), com conferência.
+async function completeFromCosmos() {
+  const conn = connectionsOf('cosmos').find((c) => c.status?.ok) ?? connectionsOf('cosmos')[0];
+  if (!conn) return toast('Cadastre a conexão Cosmos na aba Integrações.');
+  const lacking = state.products.filter(
+    (p) => p.ean && (!p.name || p.name === p.sku || p.brand === 'Sem marca' || !(p.width > 0 && p.height > 0 && p.depth > 0)),
+  );
+  if (lacking.length === 0) return toast('Nenhum produto com EAN tem dado faltando.');
+  pending = { kind: 'progress', done: 0, total: lacking.length };
+  renderImport();
+  const rows = [];
+  const errors = [];
+  for (const p of lacking) {
+    try {
+      const res = await proxyFetch(buildRequest(conn, { gtin: p.ean }));
+      if (res.status === 200) {
+        const found = cosmosToProductRow(JSON.parse(res.body), p.sku);
+        // só preenche o que falta: o cadastro de vocês tem prioridade
+        const row = { line: p.sku, sku: p.sku };
+        if ((!p.name || p.name === p.sku) && found.name) row.name = found.name;
+        if (p.brand === 'Sem marca' && found.brand) row.brand = found.brand;
+        for (const m of ['width', 'height', 'depth']) if (!(p[m] > 0) && found[m]) row[m] = found[m];
+        if (Object.keys(row).length > 2) rows.push(row);
+      } else errors.push({ line: p.sku, text: `${p.name}: ${describeHttp(res.status)}` });
+      if (res.status === 401 || res.status === 403 || res.status === 429) break;
+    } catch (err) {
+      errors.push({ line: p.sku, text: err.message });
+      break;
+    }
+    pending.done++;
+    renderImport();
+  }
+  const { products, summary } = mergeProducts(state.products, rows);
+  pending = { kind: 'sheet', products, summary, errors, columns: { cosmos: { header: `Cosmos (${conn.name})`, scale: 1 } } };
+  renderImport();
+}
+
+// ---------- vendas da loja e virada ----------
+
+let sales = {}; // storeId -> vendas normalizadas
+let salesView = { days: 28, onlyCatalog: true, value: 'revenue' };
+
+async function saveSales() {
+  await store.set('office.sales', sales).catch(() => toast('Não foi possível salvar as vendas.'));
+}
+
+// Mesmo critério da aba Execução: a revisão do escritório vale sobre o status do promotor.
+function executionStatus(id, report) {
+  const review = state.reviews[id];
+  const reviewed = review && report && review.version === report.version && review.at >= (report.receivedAt ?? '');
+  return reviewed ? review.status : (report?.status ?? 'novo');
+}
+
+function viradaFor(storeId) {
+  const id = planogramId(storeId, state.category);
+  const report = reports[id];
+  if (!report) return { counted: false, reason: 'Nenhuma execução desta loja recebida ainda.' };
+  const status = executionStatus(id, report);
+  const v = viradaOf({ status, photos: report.photos });
+  let reason = '';
+  if (!v.counted) {
+    if (status === 'devolvido') reason = 'A execução foi devolvida para refazer.';
+    else if (!v.done) reason = 'A execução ainda não foi concluída.';
+    else reason = `Falta foto do ${v.missing.join(' e do ')}.`;
+  }
+  return { ...v, reason, report };
+}
+
+const money = (v) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+const signedPct = (v) => (v === null || v === undefined ? '—' : `${v > 0 ? '+' : ''}${(v * 100).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%`);
+const trendClass = (v) => (v === null || v === undefined ? '' : v > 0.02 ? 'good' : v < -0.02 ? 'bad' : '');
+
+function renderStoreSales() {
+  const box = $('#store-sales');
+  const st = state.stores.find((s) => s.id === state.salesStoreId);
+  if (!st) {
+    box.hidden = true;
+    return;
+  }
+  box.hidden = false;
+  const rows = sales[st.id] ?? [];
+  const virada = viradaFor(st.id);
+  const salesConns = connectionsOf('sales');
+  const today = new Date().toISOString().slice(0, 10);
+  const range = rows.length ? `${rows.length} registro(s) de ${rows[0].date.split('-').reverse().join('/')} a ${rows.at(-1).date.split('-').reverse().join('/')}` : 'Nenhuma venda carregada';
+
+  let analysis = '';
+  if (!virada.counted) {
+    analysis = `<div class="banner warn">Virada ainda não contabilizada. ${esc(virada.reason)} A virada conta quando o promotor envia foto do <strong>antes</strong> e do <strong>depois</strong> numa execução concluída.</div>`;
+    if (rows.length) {
+      const all = compareTurnover(rows, rows.at(-1).date, { days: 3650, products: state.products, onlyCatalog: salesView.onlyCatalog });
+      analysis += dailyChart(all.daily, { value: salesView.value, format: salesView.value === 'revenue' ? (v) => money(v) : (v) => fmt(v, 0) });
+    }
+  } else if (!rows.length) {
+    analysis = `<p class="hint">Virada em ${virada.date.split('-').reverse().join('/')}. Carregue a venda da loja para comparar.</p>`;
+  } else {
+    const r = compareTurnover(rows, virada.date, { days: salesView.days, products: state.products, onlyCatalog: salesView.onlyCatalog, today });
+    const fmtValue = salesView.value === 'revenue' ? (v) => money(v) : (v) => fmt(v, 0);
+    const top = r.bySku.filter((g) => g.change !== null || g.after > 0);
+    const gains = top.slice(0, 8);
+    const losses = [...top].reverse().slice(0, 8).filter((g) => g.afterPerDay < g.beforePerDay);
+    const skuRows = (list) =>
+      list
+        .map(
+          (g) => `<tr><td>${esc(g.label)}</td><td>${fmt(g.beforePerDay, 1)}</td><td>${fmt(g.afterPerDay, 1)}</td>
+          <td class="${trendClass(g.change)}">${g.change === null ? 'novo' : signedPct(g.change)}</td></tr>`,
+        )
+        .join('') || '<tr><td colspan="4" class="muted">—</td></tr>';
+    analysis = `
+      <div class="kpis wide">
+        <div class="kpi"><span>Unidades/dia antes</span><strong>${fmt(r.before.unitsPerDay, 1)}</strong><small>${r.before.daysWithData} dias com venda</small></div>
+        <div class="kpi"><span>Unidades/dia depois</span><strong>${fmt(r.after.unitsPerDay, 1)}</strong><small>${r.after.daysWithData} dias com venda</small></div>
+        <div class="kpi ${trendClass(r.change.units)}"><span>Variação em unidades</span><strong>${signedPct(r.change.units)}</strong></div>
+        <div class="kpi"><span>Receita/dia antes</span><strong>${money(r.before.revenuePerDay)}</strong></div>
+        <div class="kpi"><span>Receita/dia depois</span><strong>${money(r.after.revenuePerDay)}</strong></div>
+        <div class="kpi ${trendClass(r.change.revenue)}"><span>Variação em receita</span><strong>${signedPct(r.change.revenue)}</strong></div>
+      </div>
+      ${r.warnings.map((w) => `<div class="banner warn" style="margin-top:.75rem">${esc(w)}</div>`).join('')}
+      <p class="hint">Antes: ${r.before.from.split('-').reverse().join('/')} a ${r.before.to.split('-').reverse().join('/')} · depois: ${r.after.from.split('-').reverse().join('/')} a ${r.after.to.split('-').reverse().join('/')} · o dia da virada fica de fora. Médias por dia com venda.
+        ${salesView.onlyCatalog ? `Considera só os ${state.products.length} produtos do cadastro (${r.scopedRows} de ${r.totalRows} registros).` : 'Considera toda a venda carregada.'}</p>
+      <div class="chart-wrap">${dailyChart(r.daily, { value: salesView.value, virada: r.viradaDate, before: r.before, after: r.after, format: fmtValue })}</div>
+      <div class="split">
+        <div><h2 class="section-h">Por subcategoria</h2><table><thead><tr><th>Subcategoria</th><th>Un./dia antes</th><th>Un./dia depois</th><th>Variação</th></tr></thead><tbody>${r.bySubcategory
+          .map((g) => `<tr><td>${esc(g.label)}</td><td>${fmt(g.beforePerDay, 1)}</td><td>${fmt(g.afterPerDay, 1)}</td><td class="${trendClass(g.change)}">${signedPct(g.change)}</td></tr>`)
+          .join('')}</tbody></table></div>
+        <div><h2 class="section-h">Maiores ganhos</h2><table><thead><tr><th>Produto</th><th>Antes</th><th>Depois</th><th>Variação</th></tr></thead><tbody>${skuRows(gains)}</tbody></table>
+          <h2 class="section-h">Maiores quedas</h2><table><thead><tr><th>Produto</th><th>Antes</th><th>Depois</th><th>Variação</th></tr></thead><tbody>${skuRows(losses)}</tbody></table></div>
+      </div>
+      <button type="button" class="btn ghost sm" data-saction="export" style="margin-top:.75rem">Exportar comparação (CSV)</button>`;
+  }
+
+  box.innerHTML = `
+    <div class="page-title" style="margin-bottom:.5rem">
+      <div><span class="eyebrow">Vendas e virada · ${esc(state.category)}</span><h1 style="font-size:1.2rem">${esc(st.name)}</h1></div>
+      <div class="actions">
+        ${virada.counted ? `<span class="chip aprovado">Virada em ${virada.date.split('-').reverse().join('/')}</span>` : '<span class="chip devolvido">Sem virada</span>'}
+        <button type="button" class="link" data-saction="close">fechar</button>
+      </div>
+    </div>
+    <div class="sales-sources">
+      <div><strong>${esc(range)}</strong><p class="hint">Planilha CSV com data, EAN ou SKU, quantidade e valor (coluna de loja opcional: sem ela, tudo vai para esta loja). Reimportar o mesmo dia e produto substitui, não duplica.</p></div>
+      <div class="row-actions">
+        <label class="btn ghost sm file-label">Importar planilha de vendas<input type="file" accept=".csv,text/csv" data-sales-file hidden></label>
+        ${
+          salesConns.length
+            ? `<select data-sales-conn aria-label="Conexão de vendas">${salesConns.map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('')}</select>
+               <input type="date" data-sales-from value="${addDays(virada.date ?? today, -(salesView.days + 7))}" aria-label="De">
+               <input type="date" data-sales-to value="${today}" aria-label="Até">
+               <button type="button" class="btn ghost sm" data-saction="pull">Puxar da API</button>`
+            : '<span class="hint">Para puxar de uma base existente, cadastre a conexão em Integrações.</span>'
+        }
+        ${rows.length ? '<button type="button" class="link danger" data-saction="clear">apagar vendas desta loja</button>' : ''}
+      </div>
+    </div>
+    <div class="row-actions" style="margin:.75rem 0">
+      <div class="segmented" role="group" aria-label="Janela">${[14, 28, 56].map((d) => `<button type="button" data-sdays="${d}" aria-pressed="${salesView.days === d}">${d} dias</button>`).join('')}</div>
+      <div class="segmented" role="group" aria-label="Medida">${[['revenue', 'Receita'], ['units', 'Unidades']].map(([v, l]) => `<button type="button" data-svalue="${v}" aria-pressed="${salesView.value === v}">${l}</button>`).join('')}</div>
+      <label class="check"><input type="checkbox" data-sonly ${salesView.onlyCatalog ? 'checked' : ''}> Só produtos do cadastro</label>
+    </div>
+    ${analysis}`;
+}
+
+async function addSalesRows(rows, errors, label) {
+  const byStore = new Map();
+  for (const r of rows) {
+    if (!byStore.has(r.storeId)) byStore.set(r.storeId, []);
+    byStore.get(r.storeId).push(r);
+  }
+  let added = 0;
+  let replaced = 0;
+  for (const [storeId, list] of byStore) {
+    const out = mergeSales(sales[storeId] ?? [], list);
+    sales[storeId] = out.rows;
+    added += out.added;
+    replaced += out.replaced;
+  }
+  await saveSales();
+  const stores = [...byStore.keys()].map((id) => state.stores.find((s) => s.id === id)?.name ?? id).join(', ');
+  toast(`${label}: ${added} novo(s), ${replaced} substituído(s)${stores ? ` (${stores})` : ''}${errors.length ? ` · ${errors.length} linha(s) com problema` : ''}.`);
+  if (errors.length) console.warn('Vendas com problema', errors);
+  render();
+}
+
+function wireStoreSales() {
+  const box = $('#store-sales');
+  box.addEventListener('change', async (e) => {
+    const st = state.stores.find((s) => s.id === state.salesStoreId);
+    if (e.target.dataset.salesFile !== undefined) {
+      const file = e.target.files[0];
+      e.target.value = '';
+      if (!file) return;
+      const { rows, errors } = parseSalesRecords(parseCsv(await file.text()), { stores: state.stores, defaultStoreId: st.id });
+      if (!rows.length) return toast(errors[0]?.text ?? 'Nenhuma venda válida na planilha.');
+      return addSalesRows(rows, errors, 'Vendas importadas');
+    }
+    if (e.target.dataset.sonly !== undefined) {
+      salesView.onlyCatalog = e.target.checked;
+      renderStoreSales();
+    }
+  });
+  box.addEventListener('click', async (e) => {
+    const t = e.target.closest('[data-saction], [data-sdays], [data-svalue]');
+    if (!t) return;
+    const st = state.stores.find((s) => s.id === state.salesStoreId);
+    if (t.dataset.sdays) salesView.days = Number(t.dataset.sdays);
+    else if (t.dataset.svalue) salesView.value = t.dataset.svalue;
+    else if (t.dataset.saction === 'close') state.salesStoreId = null;
+    else if (t.dataset.saction === 'clear') {
+      if (!confirm(`Apagar as vendas carregadas de ${st.name}?`)) return;
+      delete sales[st.id];
+      await saveSales();
+    } else if (t.dataset.saction === 'pull') {
+      const conn = connections.find((c) => c.id === box.querySelector('[data-sales-conn]').value);
+      const inicio = box.querySelector('[data-sales-from]').value;
+      const fim = box.querySelector('[data-sales-to]').value;
+      t.disabled = true;
+      t.textContent = 'Buscando…';
+      try {
+        const res = await proxyFetch(buildRequest(conn, { loja: st.code || st.id, inicio, fim }));
+        if (res.status < 200 || res.status >= 300) throw new Error(`a API respondeu: ${describeHttp(res.status)}`);
+        const { rows, errors } = salesFromJson(JSON.parse(res.body), conn, st.id);
+        if (!rows.length) throw new Error(errors[0]?.text ?? 'a API não devolveu vendas no período');
+        return addSalesRows(rows, errors, `Vendas de ${conn.name}`);
+      } catch (err) {
+        toast(`Não foi possível puxar: ${err.message}`);
+      }
+    } else if (t.dataset.saction === 'export') {
+      const r = compareTurnover(sales[st.id], viradaFor(st.id).date, { days: salesView.days, products: state.products, onlyCatalog: salesView.onlyCatalog });
+      const data = r.bySku.map((g) => ({
+        product: g.label,
+        before: g.before,
+        after: g.after,
+        beforePerDay: g.beforePerDay.toFixed(2),
+        afterPerDay: g.afterPerDay.toFixed(2),
+        change: g.change === null ? '' : (g.change * 100).toFixed(1),
+      }));
+      return saveFile(
+        `virada-${st.id}-${r.viradaDate}.csv`,
+        toCsv(data, [
+          ['product', 'Produto'],
+          ['before', `Unidades ${r.before.from} a ${r.before.to}`],
+          ['after', `Unidades ${r.after.from} a ${r.after.to}`],
+          ['beforePerDay', 'Un./dia antes'],
+          ['afterPerDay', 'Un./dia depois'],
+          ['change', 'Variação (%)'],
+        ]),
+        'text/csv',
+      );
+    }
+    render();
+  });
+}
+
 // ---------- geral ----------
 
 let toastTimer;
@@ -1143,6 +1540,7 @@ function render() {
   if (state.tab === 'planogram') renderPlanogramTab();
   if (state.tab === 'products') renderProductsTab();
   if (state.tab === 'stores') renderStoresTab();
+  if (state.tab === 'integrations') renderIntegrationsTab();
   renderExecutionTab();
   save();
 }
@@ -1270,6 +1668,8 @@ wireCanvas();
 wireProducts();
 wireStores();
 wireExecution();
+wireIntegrations();
+wireStoreSales();
 wireGeneral();
 if (state.planogram) render();
 else regenerate();

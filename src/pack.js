@@ -207,6 +207,26 @@ export function mergeReports(existing, report) {
   return { reports: out, merged };
 }
 
+export const PHOTO_KINDS = { antes: 'Antes', depois: 'Depois' };
+
+const localDate = (iso) => {
+  const d = new Date(iso);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
+// A virada só conta com foto do antes E do depois numa execução concluída (ou aprovada).
+// A data é a da última foto do depois: o estado final da gôndola. Vale para tarefa e relatório.
+export function viradaOf(execution) {
+  const photos = execution?.photos ?? [];
+  const antes = photos.filter((p) => p.kind === 'antes');
+  const depois = photos.filter((p) => p.kind === 'depois');
+  const missing = [!antes.length && 'antes', !depois.length && 'depois'].filter(Boolean);
+  const done = ['concluido', 'aprovado'].includes(execution?.status);
+  if (missing.length || !done) return { counted: false, missing, done };
+  const last = depois.map((p) => p.takenAt).sort().at(-1);
+  return { counted: true, date: localDate(last), at: last, missing: [], done };
+}
+
 export function formatDuration(ms) {
   const min = Math.round(ms / 60000);
   if (min < 60) return `${min} min`;

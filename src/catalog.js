@@ -29,7 +29,7 @@ export function gtinKey(code) {
 // ---------- planilha ----------
 
 // Nomes de coluna aceitos (minúsculas, sem acento). O primeiro de cada lista é o do export.
-const COLUMNS = {
+const PRODUCT_COLUMNS = {
   sku: ['sku', 'codigo interno', 'cod interno', 'codigo', 'id'],
   ean: ['ean', 'gtin', 'codigo de barras', 'cod barras', 'ean13', 'ean-13', 'barcode'],
   name: ['descricao', 'nome', 'produto', 'description', 'name'],
@@ -45,7 +45,7 @@ const COLUMNS = {
 const NUMERIC = new Set(['width', 'height', 'depth', 'weeklyUnits', 'price', 'margin']);
 const MEASURES = new Set(['width', 'height', 'depth']);
 
-const simplify = (s) =>
+export const simplify = (s) =>
   String(s)
     .normalize('NFD')
     .replace(/[̀-ͯ]/g, '')
@@ -53,8 +53,9 @@ const simplify = (s) =>
     .replace(/[.:]/g, '')
     .trim();
 
-// Descobre qual coluna é qual e em que unidade estão as medidas (cm, mm ou m).
-export function mapColumns(headers) {
+// Descobre qual coluna é qual pelo nome (lista `spec`) e em que unidade estão as medidas
+// (cm, mm ou m) das colunas em `measures`. Serve à planilha de produtos e à de vendas.
+export function mapColumns(headers, spec = PRODUCT_COLUMNS, measures = MEASURES) {
   const map = {};
   const parsed = headers.map((raw) => {
     const h = simplify(raw);
@@ -65,16 +66,16 @@ export function mapColumns(headers) {
   for (const test of [(base, n) => base === n, (base, n) => n.length > 2 && base.startsWith(n)]) {
     for (const col of parsed) {
       if (col.used) continue;
-      const field = Object.keys(COLUMNS).find((f) => !map[f] && COLUMNS[f].some((n) => test(col.base, n)));
+      const field = Object.keys(spec).find((f) => !map[f] && spec[f].some((n) => test(col.base, n)));
       if (!field) continue;
-      map[field] = { header: col.raw, scale: MEASURES.has(field) ? col.unit : 1 };
+      map[field] = { header: col.raw, scale: measures.has(field) ? col.unit : 1 };
       col.used = true;
     }
   }
   return map;
 }
 
-const toNumber = (v) => {
+export const toNumber = (v) => {
   const s = String(v ?? '').trim().replace(/\s/g, '');
   if (s === '') return NaN;
   // "1.234,5" e "1234,5" (pt-BR) ou "1234.5"

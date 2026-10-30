@@ -17,7 +17,8 @@ npm start
 ```
 
 Studio em http://localhost:5180 e app do promotor em http://localhost:5180/campo.html.
-Testes: `npm test` (Node 20+).
+Testes: `npm test` (Node 22.15+). O `npm start` usa os certificados do Windows/sistema
+(`--use-system-ca`), necessário quando um antivírus inspeciona HTTPS.
 
 ## Fluxo com o promotor
 
@@ -27,14 +28,44 @@ Testes: `npm test` (Node 20+).
    decisões de revisão. Envie por WhatsApp, e-mail ou Drive.
 3. No celular, **Receber pacote**: as tarefas aparecem como *Novo*. Daqui em diante não precisa
    de internet.
-4. O promotor toca **Iniciar execução**, confere cada produto (✓ certo ou ! problema: ruptura,
-   posição errada, frentes, preço/etiqueta), tira fotos e toca **Concluir**.
+4. O promotor toca **Iniciar execução**, tira a **foto do antes**, confere cada produto
+   (✓ certo ou ! problema: ruptura, posição errada, frentes, preço/etiqueta), tira a
+   **foto do depois** e toca **Concluir**.
 5. **Enviar relatório** gera um `.json` e abre o compartilhamento do Android.
 6. **Studio › Execução › Importar relatório**: conformidade, problemas, fotos e tempo por loja.
    **Aprovar** ou **Devolver** com comentário; a decisão chega ao promotor no próximo pacote,
    e uma tarefa devolvida volta para execução mantendo o que já foi conferido.
 
 Uma versão nova do mesmo planograma substitui a tarefa no aparelho; a mesma versão é ignorada.
+
+## Virada da loja e vendas antes × depois
+
+A **virada** de uma loja só é contabilizada quando a execução concluída (ou aprovada) tem foto
+do **antes** e do **depois**. A data da virada é a da última foto do depois. Execução devolvida
+pelo escritório não conta até ser refeita. A aba Execução mostra a virada de cada loja.
+
+Em **Lojas › Vendas e virada**, carregue a venda da loja:
+
+- **Planilha CSV** com data, EAN ou SKU, quantidade e valor; com coluna de loja, o arquivo pode
+  trazer várias lojas (reconhecidas pelo id, nome ou *Código na base*). Reimportar o mesmo dia e
+  produto substitui, não duplica.
+- **API** de uma base existente (conexão *Base de vendas* em Integrações), por loja e período.
+
+A comparação usa N dias antes × N dias depois (14, 28 ou 56; o dia da virada fica de fora), em
+média por dia com venda, por padrão só com os produtos do cadastro (a categoria). Mostra
+unidades e receita, variação, gráfico diário, subcategorias e maiores ganhos e quedas por
+produto, e avisa quando faltam dias de dados ou a janela depois ainda não fechou. É uma
+comparação antes × depois da própria loja: sazonalidade, preço e promoções não são isolados.
+
+## Integrações (chaves de API)
+
+Aba **Integrações**: *Base de vendas (API REST/JSON)* com caminho, cabeçalho de autenticação e
+nomes dos campos configuráveis; *Cosmos (Bluesoft)* para completar descrição, marca e medidas
+pelo EAN (Produtos › Completar pelo EAN, só preenche o que falta, com conferência); e *Outra
+plataforma* para guardar uma chave e testá-la. As chaves ficam só no navegador deste
+computador, sem criptografia, e não vão no “Salvar projeto” nem nos pacotes para o app. As
+chamadas passam pelo servidor local (`npm start`), que só aceita pedidos da própria página e só
+endereços https.
 
 ## Imagens e medidas dos produtos
 
@@ -89,6 +120,8 @@ Para gerar localmente é preciso JDK 21 e Android SDK: `npm run android:apk`.
 
 - `src/engine.js`: geração (blocos, espaço, frentes, lojas)
 - `src/metrics.js`: indicadores e validação
+- `src/sales.js`: venda da loja e comparação antes × depois da virada
+- `src/integrations.js`: conexões de API (modelos, requisição, leitura da resposta); `src/charts.js`: gráfico diário
 - `src/catalog.js`: EAN/GTIN, planilha de cadastro e associação de imagens pelo nome do arquivo
 - `src/pack.js`: pacotes de planogramas e de imagens, tarefas, relatório, revisão (formato de troca)
 - `src/render.js`: desenho da gôndola em SVG

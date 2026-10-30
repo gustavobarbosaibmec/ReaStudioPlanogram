@@ -20,6 +20,7 @@
         <button class="tab" role="tab" data-tab="products">Produtos</button>
         <button class="tab" role="tab" data-tab="stores">Lojas</button>
         <button class="tab" role="tab" data-tab="execution">Execução <span class="count" id="exec-count" hidden></span></button>
+        <button class="tab" role="tab" data-tab="integrations">Integrações</button>
         <button class="tab" role="tab" data-tab="evidence">Evidências</button>
       </nav>
       <div class="top-actions">
@@ -95,6 +96,7 @@
           <div><span class="eyebrow">Cadastro</span><h1>Biblioteca de produtos</h1></div>
           <div class="actions">
             <button type="button" class="btn ghost" id="add-product">+ Produto</button>
+            <button type="button" class="btn ghost" id="complete-cosmos" title="Usa a conexão Cosmos da aba Integrações">Completar pelo EAN (Cosmos)</button>
             <button type="button" class="btn ghost" id="export-products">Exportar planilha (modelo)</button>
           </div>
         </div>
@@ -142,11 +144,12 @@
           <p class="hint">Cada loja tem seu número de módulos, um índice de venda por subcategoria e os SKUs fora do sortimento. As mesmas regras geram um planograma específico para cada uma.</p>
           <div class="table-wrap">
             <table id="stores-table" class="edit-table">
-              <thead><tr><th>Loja</th><th>Módulos</th><th>Índice de venda (subcategoria=fator)</th><th>SKUs fora do sortimento</th><th></th></tr></thead>
+              <thead><tr><th>Loja</th><th>Código na base</th><th>Módulos</th><th>Índice de venda (subcategoria=fator)</th><th>SKUs fora do sortimento</th><th></th></tr></thead>
               <tbody></tbody>
             </table>
           </div>
         </div>
+        <div id="store-sales" class="card page-card store-sales" hidden></div>
         <div class="card page-card"><h2 style="font-size:1rem;margin-bottom:.5rem">Resultado por loja</h2><div id="batch" class="table-wrap"></div></div>
       </section>
 
@@ -173,9 +176,26 @@
         </div>
         <div class="card page-card">
           <h2 style="font-size:1rem;margin-bottom:.5rem">Lojas</h2>
-          <div class="table-wrap"><table id="exec-table"><thead><tr><th>Loja</th><th>Categoria</th><th>Versão</th><th>Status</th><th>Conformidade</th><th>Problemas</th><th>Fotos</th><th>Tempo</th><th>Relatório</th><th></th></tr></thead><tbody></tbody></table></div>
+          <div class="table-wrap"><table id="exec-table"><thead><tr><th>Loja</th><th>Categoria</th><th>Versão</th><th>Status</th><th>Conformidade</th><th>Problemas</th><th>Fotos</th><th>Tempo</th><th>Relatório</th><th>Virada</th><th></th></tr></thead><tbody></tbody></table></div>
         </div>
         <div id="review" class="card page-card review" hidden></div>
+      </section>
+
+      <!-- INTEGRAÇÕES -->
+      <section id="tab-integrations" hidden>
+        <div class="page-title">
+          <div><span class="eyebrow">Chaves de API</span><h1>Integrações</h1></div>
+          <div class="actions">
+            <select id="connection-type" aria-label="Plataforma">
+              <option value="sales">Base de vendas (API REST/JSON)</option>
+              <option value="cosmos">Cosmos (Bluesoft): produtos por EAN</option>
+              <option value="custom">Outra plataforma</option>
+            </select>
+            <button type="button" class="btn" id="add-connection">Adicionar conexão</button>
+          </div>
+        </div>
+        <div class="banner">As chaves ficam salvas só neste computador, no navegador, e não vão no “Salvar projeto” nem nos pacotes para o app. As chamadas passam pelo servidor local do Studio (<code>npm start</code>), que só aceita pedidos da própria página e só endereços https.</div>
+        <div id="connections"></div>
       </section>
 
       <!-- EVIDÊNCIAS -->

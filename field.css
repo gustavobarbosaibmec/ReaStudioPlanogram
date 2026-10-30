@@ -594,3 +594,13 @@ body.field {
   font-weight: 700;
   margin: 1rem 0 0.5rem;
 }
+
+.note.ok {
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+button.add-photo {
+  font: inherit;
+  width: 100%;
+}

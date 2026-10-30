@@ -6,6 +6,7 @@ import { generatePlanogram, localizeInputs } from './engine.js';
 import { compressImage, readJsonFile, saveFile } from './files.js';
 import {
   ISSUES,
+  PHOTO_KINDS,
   STATUS,
   applyPack,
   compliance,
@@ -18,6 +19,7 @@ import {
   parseImagePack,
   parsePack,
   publishPlanogram,
+  viradaOf,
 } from './pack.js';
 import { colorFor, esc, renderPlanogram, slotIndex } from './render.js';
 import * as store from './store.js';
@@ -28,7 +30,7 @@ const dateTime = (iso) => (iso ? new Date(iso).toLocaleString('pt-BR', { dateSty
 let tasks = [];
 let images = {}; // chave -> data URL, vindo do pacote de imagens
 let settings = { promoter: '' };
-const ui = { filter: 'pending', mode: 'drawing', bay: 0, zoom: 1, query: '', sheet: null };
+const ui = { filter: 'pending', mode: 'drawing', bay: 0, zoom: 1, query: '', sheet: null, photoKind: 'antes' };
 let timerHandle;
 
 async function persist() {
@@ -239,11 +241,22 @@ function renderTask(t) {
       })
       .join('');
   } else {
+    const v = viradaOf({ status: 'concluido', photos: t.photos });
+    const section = (kind, label, hint) => {
+      const list = t.photos.filter((ph) => ph.kind === kind);
+      return `<h2 class="section-title">${label} <span class="muted">(${list.length})</span></h2>
+        <p class="hint" style="margin-top:-.3rem">${hint}</p>
+        <div class="photos">
+          ${list.map((ph) => `<div class="photo"><img src="${esc(ph.dataUrl)}" alt="Foto ${label.toLowerCase()}">${editable(t) ? `<button type="button" class="icon-btn" data-remove-photo="${ph.id}" aria-label="Remover foto">×</button>` : ''}</div>`).join('')}
+          ${editable(t) ? `<button type="button" class="add-photo" data-photo="${kind}"><div><span>+</span>Foto do ${label.toLowerCase()}</div></button>` : ''}
+        </div>`;
+    };
+    const others = t.photos.filter((ph) => !PHOTO_KINDS[ph.kind]);
     body = `
-      <div class="photos">
-        ${t.photos.map((ph) => `<div class="photo"><img src="${esc(ph.dataUrl)}" alt="Foto da gôndola">${editable(t) ? `<button type="button" class="icon-btn" data-remove-photo="${ph.id}" aria-label="Remover foto">×</button>` : ''}</div>`).join('')}
-        ${editable(t) ? '<label class="add-photo" for="photo-input"><div><span>+</span>Tirar foto</div></label>' : ''}
-      </div>
+      <div class="note ${v.missing.length ? '' : 'ok'}">${v.missing.length ? `A virada da loja só conta com foto do <strong>antes</strong> e do <strong>depois</strong>. Falta: ${v.missing.join(' e ')}.` : 'Fotos do antes e do depois prontas: a virada será contabilizada ao concluir.'}</div>
+      ${section('antes', 'Antes', 'A gôndola como você encontrou, antes de mexer.')}
+      ${section('depois', 'Depois', 'A gôndola pronta, igual ao planograma. Inteira, de frente.')}
+      ${others.length ? `<h2 class="section-title">Outras (${others.length})</h2><div class="photos">${others.map((ph) => `<div class="photo"><img src="${esc(ph.dataUrl)}" alt="Foto"></div>`).join('')}</div>` : ''}
       ${t.photos.length === 0 && !editable(t) ? '<p class="hint">Inicie a execução para tirar fotos.</p>' : ''}
       <label class="field"><span>Comentário para o escritório</span>
         <textarea id="comment" rows="3" ${editable(t) ? '' : 'disabled'} placeholder="Ex.: faltou produto no depósito">${esc(t.comment)}</textarea></label>`;
@@ -443,10 +456,15 @@ async function onTaskClick(e) {
   const id = decodeURIComponent(location.hash.split('/')[1] ?? '');
   const t = taskById(id);
   if (!t) return;
-  const el = e.target.closest('[data-mode], [data-bay], [data-zoom], [data-action], [data-pos], [data-shelf-ok], [data-remove-photo], g.pos');
+  const el = e.target.closest('[data-mode], [data-bay], [data-zoom], [data-action], [data-pos], [data-shelf-ok], [data-remove-photo], [data-photo], g.pos');
   if (!el) return;
   if (el.matches('g.pos')) return openSheet(t.id, el.dataset.id);
   if (el.dataset.pos) return openSheet(t.id, el.dataset.pos);
+  if (el.dataset.photo) {
+    ui.photoKind = el.dataset.photo;
+    $('#photo-input').click();
+    return;
+  }
   if (el.dataset.mode) ui.mode = el.dataset.mode;
   else if (el.dataset.bay) ui.bay = Number(el.dataset.bay);
   else if (el.dataset.zoom) ui.zoom = Math.min(3, Math.max(0.6, ui.zoom + Number(el.dataset.zoom) * 0.3));
@@ -465,12 +483,17 @@ async function onTaskClick(e) {
     t.startedAt = t.startedAt && t.officeComment ? t.startedAt : new Date().toISOString();
     t.finishedAt = null;
     await persist();
+    if (!t.photos.some((ph) => ph.kind === 'antes')) {
+      ui.mode = 'photos';
+      toast('Antes de mexer na gôndola, tire a foto do antes.');
+    }
     return showTask(t.id);
   } else if (el.dataset.action === 'finish') {
     const c = compliance(t);
     const missing = c.total - c.checked;
     if (missing > 0 && !confirm(`Faltam ${missing} posição(ões) sem conferência. Concluir mesmo assim?`)) return;
-    if (t.photos.length === 0 && !confirm('Nenhuma foto anexada. Concluir sem foto?')) return;
+    const v = viradaOf({ status: 'concluido', photos: t.photos });
+    if (v.missing.length && !confirm(`Falta foto do ${v.missing.join(' e do ')}. Sem elas a virada da loja não é contabilizada. Concluir mesmo assim?`)) return;
     t.status = 'concluido';
     t.finishedAt = new Date().toISOString();
     await persist();
@@ -494,7 +517,7 @@ function wire() {
     const t = taskById(decodeURIComponent(location.hash.split('/')[1] ?? ''));
     if (!file || !t) return;
     try {
-      t.photos.push({ id: `f${Date.now()}`, dataUrl: await compressImage(file), takenAt: new Date().toISOString() });
+      t.photos.push({ id: `f${Date.now()}`, kind: ui.photoKind, dataUrl: await compressImage(file), takenAt: new Date().toISOString() });
       await persist();
       renderTask(t);
     } catch (err) {

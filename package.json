@@ -5,14 +5,14 @@
   "type": "module",
   "description": "Planograma Studio (escritório) e Planograma Campo (app do promotor, offline)",
   "scripts": {
-    "start": "node server.mjs",
+    "start": "node --use-system-ca server.mjs",
     "test": "node --test \"test/*.test.mjs\"",
     "build:www": "node scripts/build-www.mjs",
     "android:sync": "npm run build:www && cap sync android",
     "android:apk": "npm run android:sync && cd android && gradlew assembleDebug"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22.15"
   },
   "dependencies": {
     "@capacitor/android": "8.5.3",

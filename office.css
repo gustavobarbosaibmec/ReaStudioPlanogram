@@ -756,3 +756,125 @@ tr.is-selected td {
     grid-template-columns: 1fr;
   }
 }
+
+/* integrações */
+.grid3 {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 0.6rem;
+  margin-top: 0.75rem;
+}
+
+.connection + .connection {
+  margin-top: 1rem;
+}
+
+.title-input {
+  font-size: 1.05rem;
+  font-weight: 700;
+  border-color: transparent;
+  padding: 0.15rem 0.3rem;
+  margin-left: -0.3rem;
+  width: min(32rem, 100%);
+}
+
+.title-input:hover {
+  border-color: var(--line);
+}
+
+.probe {
+  margin: 0.75rem 0 0;
+  padding: 0.6rem 0.75rem;
+  background: var(--line-2);
+  border-radius: var(--radius-sm);
+  font-size: 0.75rem;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 10rem;
+  overflow: auto;
+}
+
+/* vendas e virada */
+.store-sales {
+  border-color: var(--primary);
+}
+
+.sales-sources {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  align-items: center;
+  background: var(--line-2);
+  border-radius: var(--radius-sm);
+  padding: 0.75rem 1rem;
+}
+
+.sales-sources .hint {
+  max-width: 520px;
+}
+
+.sales-sources select,
+.sales-sources input[type='date'] {
+  width: auto;
+}
+
+.nowrap {
+  white-space: nowrap;
+}
+
+td.good {
+  color: var(--success);
+  font-weight: 700;
+}
+
+td.bad {
+  color: var(--danger);
+  font-weight: 700;
+}
+
+.chart-wrap {
+  margin-top: 0.75rem;
+  max-width: 980px;
+}
+
+.chart {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.chart-line {
+  fill: none;
+  stroke: var(--primary);
+  stroke-width: 2;
+}
+
+.chart-grid {
+  stroke: var(--line);
+}
+
+.chart-axis {
+  font-size: 11px;
+  fill: var(--muted);
+}
+
+.chart-before {
+  fill: rgba(100, 116, 139, 0.08);
+}
+
+.chart-after {
+  fill: rgba(245, 158, 11, 0.12);
+}
+
+.chart-virada {
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-dasharray: 4 3;
+}
+
+.chart-virada-label {
+  font-size: 11px;
+  font-weight: 700;
+  fill: var(--warn);
+}
