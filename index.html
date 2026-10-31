@@ -24,6 +24,7 @@
         <button class="tab" role="tab" data-tab="evidence">Evidências</button>
       </nav>
       <div class="top-actions">
+        <button type="button" class="chip cloud-chip" id="cloud-status" hidden></button>
         <label class="btn ghost sm file-label">Abrir projeto<input type="file" id="import-json" accept=".json,application/json" hidden /></label>
         <button type="button" class="btn ghost sm" id="export-json">Salvar projeto</button>
         <a class="btn ghost sm" href="campo.html" target="_blank" rel="noopener">App do promotor ↗</a>
@@ -183,6 +184,11 @@
 
       <!-- INTEGRAÇÕES -->
       <section id="tab-integrations" hidden>
+        <div class="page-title">
+          <div><span class="eyebrow">Supabase</span><h1>Nuvem</h1></div>
+        </div>
+        <div id="cloud" class="card page-card cloud"></div>
+
         <div class="page-title">
           <div><span class="eyebrow">Chaves de API</span><h1>Integrações</h1></div>
           <div class="actions">

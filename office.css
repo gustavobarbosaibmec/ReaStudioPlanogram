@@ -878,3 +878,58 @@ td.bad {
   font-weight: 700;
   fill: var(--warn);
 }
+
+/* nuvem */
+.cloud {
+  margin-bottom: 1.5rem;
+}
+
+.cloud-chip {
+  border: 0;
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.cloud-chip.ok {
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.cloud-chip.busy {
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+
+.cloud-chip.warn {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.cloud-chip.error {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.cloud .row-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-top: 0.75rem;
+}
+
+.cloud .grid3 .field input,
+.cloud .grid3 .field select {
+  width: 100%;
+}
+
+.cloud .team {
+  margin-top: 1.25rem;
+}
+
+.cloud .team h2 {
+  font-size: 0.95rem;
+  margin-bottom: 0.5rem;
+}

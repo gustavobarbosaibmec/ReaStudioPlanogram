@@ -67,6 +67,44 @@ computador, sem criptografia, e não vão no “Salvar projeto” nem nos pacote
 chamadas passam pelo servidor local (`npm start`), que só aceita pedidos da própria página e só
 endereços https.
 
+## Nuvem (Supabase), fase 1
+
+O Studio pode guardar o projeto num banco Supabase. Assim várias pessoas do escritório trabalham
+no mesmo projeto e nada se perde se o navegador for limpo. Sem nuvem configurada, tudo continua
+funcionando só no computador, como antes.
+
+1. Crie o projeto em supabase.com (região São Paulo).
+2. No **SQL Editor**, rode o conteúdo de `supabase/migrations/20261031120000_fase1_base.sql`.
+   Ele cria as tabelas, as regras de acesso e o bucket de imagens.
+3. No Studio, em **Integrações › Nuvem**, cole o endereço do projeto e a **chave pública**
+   (anon ou publishable, em Project Settings › API Keys). O Studio recusa a chave secreta
+   (service_role): ela ignora as regras de acesso e nunca pode ficar no navegador.
+4. Crie sua conta, crie a empresa e adicione a equipe pelo e-mail. Cada pessoa cria a própria
+   conta antes de ser adicionada.
+
+O que sobe: gôndola, regras, planograma em edição, revisões, lojas, produtos, a última versão
+publicada e as imagens dos produtos (bucket `product-images`, uma pasta por empresa). A aba
+aberta, o zoom e a seleção ficam só no computador. As chaves de API das integrações também
+continuam só no navegador.
+
+Como sincroniza:
+
+- O envio é automático alguns segundos depois de cada alteração. Ao voltar para a aba, o Studio
+  confere se outra pessoa gravou e baixa a versão nova.
+- Cada gravação diz qual revisão leu. Se outra pessoa gravou antes, nada é sobrescrito: o Studio
+  mostra **Conflito** e pergunta qual versão fica. Ao ficar com a da nuvem, a versão deste
+  computador fica guardada como cópia de segurança no navegador (`office.backup`).
+- Sem internet, o Studio continua funcionando e mostra **Offline**. As alterações sobem quando a
+  conexão voltar.
+
+Papéis: **Administrador** (gerencia a equipe), **Escritório** (planeja e publica) e **Promotor**
+(só lê os produtos e os planogramas das lojas atribuídas a ele). As regras ficam no banco
+(RLS), não só na tela. O teste `test/supabase.test.mjs` roda a migração num Postgres local
+(PGlite) e confere essas regras.
+
+Próximas fases: app do promotor com login e sincronização (tarefas, relatórios e fotos),
+vendas no banco com a análise da virada em SQL, e chaves de API em Edge Functions.
+
 ## Imagens e medidas dos produtos
 
 A plataforma não vem com imagens: elas vêm do cadastro de vocês (fornecedores, GS1, fotos
@@ -126,13 +164,16 @@ Para gerar localmente é preciso JDK 21 e Android SDK: `npm run android:apk`.
 - `src/pack.js`: pacotes de planogramas e de imagens, tarefas, relatório, revisão (formato de troca)
 - `src/render.js`: desenho da gôndola em SVG
 - `src/app.js`: Studio; `src/field.js`: app do promotor
+- `src/cloud.js`: nuvem Supabase (login, projeto, imagens e decisão de sincronização); `supabase/migrations/`: banco e regras de acesso
 - `src/store.js`: dados no aparelho (IndexedDB); `src/files.js`: salvar/compartilhar arquivos e fotos
 - `android/`: projeto Capacitor; `scripts/build-www.mjs` copia o app do promotor para o APK
 
 ## Limitações
 
-- Sem sincronização automática: a troca é por arquivo. Um servidor pode ser adicionado depois
-  mantendo os mesmos formatos de pacote e relatório.
+- O app do promotor ainda troca planogramas e relatórios por arquivo. A sincronização dele com a
+  nuvem é a fase 2.
+- Se o Studio publicar duas versões seguidas sem internet, só a última chega à nuvem. Imagens
+  que deixam de ser usadas não são apagadas do Storage.
 - Sem realidade aumentada, leitura de código de barras pela câmera nem notificação push.
   A busca por EAN é digitada.
 - Prateleiras com vão igual; sem ganchos, caixas ou acessórios.

@@ -2,6 +2,20 @@
 
 import { imageKeyFor, matchImages, mergeProducts, parseProductRecords, ratioCheck } from './catalog.js';
 import { dailyChart } from './charts.js';
+import {
+  ROLES,
+  WORKSPACE_FIELDS,
+  blobToDataUrl,
+  checkPublicKey,
+  createClient,
+  fingerprintOf,
+  listMembers,
+  myOrganizations,
+  parseProjectUrl,
+  syncImages,
+  syncWorkspace,
+  workspaceOf,
+} from './cloud.js';
 import { parseCsv, toCsv } from './csv.js';
 import { PRODUCT_FIELDS, sampleCategory, sampleFixture, sampleProducts, sampleRules, sampleStores } from './data.js';
 import { fixtureWidth, generatePlanogram, localizeInputs, makePosition, unitsDeep, unitsHigh } from './engine.js';
@@ -100,6 +114,7 @@ async function load() {
   reports = (await store.get('office.reports')) ?? {};
   connections = (await store.get('office.connections')) ?? [];
   sales = (await store.get('office.sales')) ?? {};
+  cloud = { ...cloudDefaults(), ...((await store.get('office.cloud')) ?? {}) };
 }
 
 let saveTimer;
@@ -108,6 +123,7 @@ function save() {
   saveTimer = setTimeout(() => {
     const { batch, ...rest } = state;
     store.set('office.state', rest).catch(() => toast('Não foi possível salvar no navegador.'));
+    scheduleCloudSync();
   }, 250);
 }
 
@@ -1520,6 +1536,355 @@ function wireStoreSales() {
   });
 }
 
+// ---------- nuvem (Supabase) ----------
+
+// Endereço e chave pública do projeto, sessão e o ponto da última troca com a nuvem.
+// Ficam neste navegador, fora do "Salvar projeto" e dos pacotes para o app.
+const cloudDefaults = () => ({ url: '', key: '', session: null, org: null, synced: null, knownImages: [], lastSyncAt: null });
+let cloud = cloudDefaults();
+let cloudStatus = { kind: '', text: '', detail: '' };
+let cloudConflict = null; // { revision, updated_at } da nuvem quando os dois lados mudaram
+let cloudOrgs = null;
+let cloudMembers = null;
+let cloudClientCache = null;
+let cloudLoading = false;
+const cloudMissing = new Set(); // imagens que nem a nuvem tem: não pede de novo nesta sessão
+
+async function saveCloud() {
+  await store.set('office.cloud', cloud).catch(() => toast('Não foi possível salvar a configuração da nuvem.'));
+}
+
+function cloudClient() {
+  if (!cloud.url || !cloud.key) return null;
+  if (cloudClientCache?.url !== cloud.url || cloudClientCache?.key !== cloud.key) {
+    const client = createClient({
+      url: cloud.url,
+      key: cloud.key,
+      session: cloud.session,
+      onSession: (session) => {
+        cloud.session = session;
+        if (!session) setCloudStatus('warn', 'Entre de novo');
+        saveCloud();
+      },
+    });
+    cloudClientCache = { url: cloud.url, key: cloud.key, client };
+  }
+  return cloudClientCache.client;
+}
+
+function setCloudStatus(kind, text, detail = '') {
+  cloudStatus = { kind, text, detail };
+  renderCloud();
+}
+
+const imageKeysInUse = () =>
+  [...state.products.map((p) => p.imageKey), ...(state.published?.planograms ?? []).flatMap((g) => g.products.map((p) => p.imageKey))].filter(Boolean);
+
+async function imageFromBlob(blob) {
+  const url = await blobToDataUrl(blob);
+  try {
+    const bmp = await createImageBitmap(blob);
+    return { url, w: bmp.width, h: bmp.height };
+  } catch {
+    return { url, w: 0, h: 0 };
+  }
+}
+
+async function applyRemote(remote) {
+  // o projeto deste computador fica guardado antes de dar lugar ao da nuvem
+  await store.set('office.backup', { at: new Date().toISOString(), workspace: workspaceOf(state) });
+  const base = defaults();
+  for (const k of WORKSPACE_FIELDS) state[k] = remote.data?.[k] ?? base[k];
+  state.stores = remote.stores;
+  state.products = remote.products;
+  state.published = remote.publication;
+  state.selectedId = null;
+  history = [];
+  renderConfig();
+}
+
+let cloudTimer;
+let syncing = null;
+let syncAgain = false;
+
+function scheduleCloudSync() {
+  if (!cloud.org || !cloud.session || cloudConflict) return;
+  clearTimeout(cloudTimer);
+  cloudTimer = setTimeout(() => {
+    if (fingerprintOf(workspaceOf(state)) !== cloud.synced?.fingerprint) syncCloud();
+  }, 3000);
+}
+
+async function syncCloud({ resolve = null, quiet = true } = {}) {
+  const client = cloudClient();
+  if (!client?.session || !cloud.org || cloud.org.role === 'promoter') return;
+  if (syncing) {
+    syncAgain = true;
+    return syncing;
+  }
+  syncing = (async () => {
+    const org = cloud.org.id;
+    const previous = cloudStatus.kind;
+    const sent = fingerprintOf(workspaceOf(state));
+    setCloudStatus('busy', 'Sincronizando…');
+    try {
+      const out = await syncWorkspace(client, org, { workspace: workspaceOf(state), synced: cloud.synced, resolve });
+      // editou durante a ida à nuvem: não troca o trabalho novo pelo da nuvem sem perguntar
+      const editedMeanwhile = out.action === 'pulled' && !resolve && fingerprintOf(workspaceOf(state)) !== sent;
+      if (out.action === 'conflict' || editedMeanwhile) {
+        cloudConflict = out.cloud;
+        setCloudStatus('warn', 'Conflito', 'A nuvem e este computador mudaram o projeto. Escolha qual versão fica em Integrações › Nuvem.');
+        if (!quiet || previous !== 'warn') toast('O projeto mudou na nuvem e aqui. Escolha qual versão fica em Integrações › Nuvem.');
+        return;
+      }
+      cloudConflict = null;
+      if (out.action === 'pulled') {
+        await applyRemote(out.remote);
+        cloud.synced = { org, revision: Number(out.remote.revision), fingerprint: fingerprintOf(workspaceOf(state)) };
+      } else if (out.action === 'pushed') cloud.synced = { org, ...out.synced };
+
+      const imgs = await syncImages(client, org, { keys: imageKeysInUse().filter((k) => !cloudMissing.has(k)), images, known: cloud.knownImages, toImage: imageFromBlob });
+      cloud.knownImages = imgs.known;
+      for (const k of imgs.missing) cloudMissing.add(k);
+      if (imgs.downloaded) {
+        Object.assign(images, imgs.added);
+        await saveImages();
+      }
+      cloud.lastSyncAt = new Date().toISOString();
+      const failed = imgs.failed.length ? `${imgs.failed.length} imagem(ns) não subiram: ${imgs.failed[0].text}` : '';
+      setCloudStatus(failed ? 'warn' : 'ok', failed ? 'Salvo, com avisos' : 'Salvo na nuvem', failed);
+      if (out.action === 'pulled') {
+        toast('Projeto atualizado com a versão da nuvem.');
+        render();
+      } else if (!quiet) toast(out.action === 'pushed' ? 'Projeto enviado para a nuvem.' : 'Tudo em dia com a nuvem.');
+    } catch (err) {
+      const offline = err.code === 'offline';
+      setCloudStatus(offline ? 'warn' : 'error', offline ? 'Offline' : 'Erro na nuvem', err.message);
+      if (!quiet || (!offline && previous !== 'error')) toast(err.message);
+    } finally {
+      await saveCloud();
+      syncing = null;
+      renderCloud();
+      if (syncAgain) {
+        syncAgain = false;
+        scheduleCloudSync();
+      }
+    }
+  })();
+  return syncing;
+}
+
+async function loadCloudLists() {
+  const client = cloudClient();
+  if (!client?.session || cloudLoading) return;
+  cloudLoading = true;
+  try {
+    if (!cloud.org && cloudOrgs === null) cloudOrgs = await myOrganizations(client);
+    if (cloud.org && cloudMembers === null) cloudMembers = await listMembers(client, cloud.org.id);
+  } catch (err) {
+    cloudOrgs ??= [];
+    cloudMembers ??= [];
+    toast(err.message);
+  } finally {
+    cloudLoading = false;
+  }
+  renderCloud();
+}
+
+function chooseOrg(org) {
+  if (cloud.synced?.org !== org.id) {
+    cloud.synced = null;
+    cloud.knownImages = [];
+  }
+  cloud.org = org;
+  cloudConflict = null;
+  cloudMembers = null;
+}
+
+function cloudCardHtml() {
+  const migration = '<code>supabase/migrations</code>';
+  if (!cloud.url || !cloud.key)
+    return `<p class="hint">Guarde projeto, lojas, produtos e imagens num banco Supabase: várias pessoas do escritório trabalham no mesmo projeto e nada se perde se este navegador for limpo. Crie o projeto em <a href="https://supabase.com/dashboard" target="_blank" rel="noopener">supabase.com</a> (região São Paulo), rode os arquivos de ${migration} no SQL Editor e cole aqui o endereço e a chave pública (Project Settings › API Keys).</p>
+      <div class="grid3">
+        <label class="field"><span>Endereço do projeto</span><input type="url" id="cloud-url" placeholder="https://abcdefgh.supabase.co"></label>
+        <label class="field"><span>Chave pública (anon ou publishable)</span><input type="text" id="cloud-key" autocomplete="off" spellcheck="false" placeholder="sb_publishable_… ou eyJ…"></label>
+      </div>
+      <p class="hint">Nunca cole a chave secreta (service_role): ela ignora as regras de acesso.</p>
+      <div class="row-actions"><button type="button" class="btn" data-cloud="connect">Conectar</button></div>`;
+
+  const project = `Projeto <strong>${esc(new URL(cloud.url).host)}</strong>`;
+  if (!cloud.session)
+    return `<p class="hint">${project} · <button type="button" class="link" data-cloud="forget">trocar projeto</button></p>
+      <div class="grid3">
+        <label class="field"><span>E-mail</span><input type="email" id="cloud-email" autocomplete="username"></label>
+        <label class="field"><span>Senha</span><input type="password" id="cloud-password" autocomplete="current-password"></label>
+      </div>
+      <div class="row-actions">
+        <button type="button" class="btn" data-cloud="sign-in">Entrar</button>
+        <button type="button" class="btn ghost" data-cloud="sign-up">Criar conta</button>
+      </div>`;
+
+  const who = `${project} · <strong>${esc(cloud.session.user.email)}</strong> · <button type="button" class="link" data-cloud="sign-out">sair</button>`;
+  if (!cloud.org) {
+    if (cloudOrgs === null) {
+      loadCloudLists();
+      return `<p class="hint">${who}</p><p class="hint">Carregando empresas…</p>`;
+    }
+    const pick = cloudOrgs.length
+      ? `<div class="row-actions"><select id="cloud-org" aria-label="Empresa">${cloudOrgs
+          .map((o) => `<option value="${esc(o.id)}">${esc(o.name)} · ${esc(ROLES[o.role] ?? o.role)}</option>`)
+          .join('')}</select><button type="button" class="btn" data-cloud="use-org">Usar esta empresa</button></div>`
+      : '<p class="hint">Sua conta ainda não está em nenhuma empresa. Crie a sua ou peça ao administrador para adicionar o seu e-mail.</p>';
+    return `<p class="hint">${who}</p>${pick}
+      <div class="row-actions"><input type="text" id="cloud-org-name" placeholder="Nome da empresa" aria-label="Nome da nova empresa">
+        <button type="button" class="btn ghost" data-cloud="create-org">Criar empresa</button></div>`;
+  }
+
+  const head = `<p class="hint">${who} · Empresa <strong>${esc(cloud.org.name)}</strong> (${esc(ROLES[cloud.org.role] ?? cloud.org.role)}) · <button type="button" class="link" data-cloud="change-org">trocar empresa</button></p>`;
+  if (cloud.org.role === 'promoter')
+    return `${head}<div class="banner warn">Promotores usam o app de campo. Para planejar no Studio, peça ao administrador o papel Escritório.</div>`;
+
+  const conflict = cloudConflict
+    ? `<div class="banner warn">A nuvem tem alterações de outro computador${cloudConflict.updated_at ? ` (${esc(dateTime(cloudConflict.updated_at))})` : ''} e este computador também tem alterações não enviadas.
+        <button type="button" class="btn sm" data-cloud="resolve-pull">Ficar com a da nuvem</button>
+        <button type="button" class="btn ghost sm" data-cloud="resolve-push">Enviar a deste computador</button></div>
+       <p class="hint">Ficando com a da nuvem, a versão deste computador é guardada como cópia de segurança no navegador.</p>`
+    : '';
+  const status = cloud.synced
+    ? `Revisão ${cloud.synced.revision} · última sincronização ${esc(dateTime(cloud.lastSyncAt))}`
+    : 'Ainda não sincronizado com esta empresa.';
+  const detail = cloudStatus.detail ? `<pre class="probe">${esc(cloudStatus.detail)}</pre>` : '';
+  return `${head}${conflict}
+    <div class="row-actions"><span class="chip cloud-chip ${esc(cloudStatus.kind)}">${esc(cloudStatus.text || 'Nuvem')}</span><span class="hint">${status}</span>
+      <button type="button" class="btn ghost sm" data-cloud="sync">Sincronizar agora</button></div>${detail}
+    ${teamHtml()}`;
+}
+
+function teamHtml() {
+  if (cloudMembers === null) {
+    loadCloudLists();
+    return '<div class="team"><h2>Equipe</h2><p class="hint">Carregando…</p></div>';
+  }
+  const admin = cloud.org.role === 'admin';
+  const me = cloud.session.user.id;
+  const rows = cloudMembers
+    .map(
+      (m) => `<tr><td>${esc(m.display_name || '—')}</td><td>${esc(ROLES[m.role] ?? m.role)}</td>
+        <td>${admin && m.user_id !== me ? `<button type="button" class="link danger" data-cloud="remove-member" data-user="${esc(m.user_id)}" data-name="${esc(m.display_name)}">remover</button>` : ''}</td></tr>`,
+    )
+    .join('');
+  const add = admin
+    ? `<div class="grid3">
+        <label class="field"><span>E-mail da pessoa</span><input type="email" id="member-email"></label>
+        <label class="field"><span>Nome</span><input type="text" id="member-name"></label>
+        <label class="field"><span>Papel</span><select id="member-role">${Object.entries(ROLES)
+          .map(([k, v]) => `<option value="${k}" ${k === 'office' ? 'selected' : ''}>${v}</option>`)
+          .join('')}</select></label>
+      </div>
+      <div class="row-actions"><button type="button" class="btn ghost sm" data-cloud="add-member">Adicionar à equipe</button>
+        <span class="hint">A pessoa cria a conta antes (Criar conta, com o e-mail dela). Adicionar de novo muda o papel.</span></div>`
+    : '';
+  return `<div class="team"><h2>Equipe</h2><div class="table-wrap"><table><thead><tr><th>Pessoa</th><th>Papel</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>${add}</div>`;
+}
+
+function renderCloud() {
+  const chip = $('#cloud-status');
+  const on = Boolean(cloud.session && cloud.org && cloud.org.role !== 'promoter');
+  chip.hidden = !on;
+  if (on) {
+    chip.className = `chip cloud-chip ${cloudStatus.kind}`;
+    chip.textContent = `☁ ${cloudStatus.text || 'Nuvem'}`;
+    chip.title = cloudStatus.detail || (cloud.lastSyncAt ? `Última sincronização: ${dateTime(cloud.lastSyncAt)}` : '');
+  }
+  if (state.tab === 'integrations') $('#cloud').innerHTML = cloudCardHtml();
+}
+
+async function cloudAction(action, target) {
+  const client = cloudClient();
+  const value = (id) => $(`#${id}`)?.value.trim() ?? '';
+  if (action === 'connect') {
+    const url = parseProjectUrl(value('cloud-url'));
+    const key = checkPublicKey(value('cloud-key'));
+    await createClient({ url, key }).check();
+    cloud = { ...cloudDefaults(), url, key };
+    toast('Projeto conectado. Entre ou crie sua conta.');
+  } else if (action === 'forget') {
+    if (!confirm('Desconectar deste projeto Supabase? O que está neste computador continua aqui.')) return;
+    await client?.signOut();
+    cloud = cloudDefaults();
+    cloudOrgs = cloudMembers = cloudConflict = null;
+  } else if (action === 'sign-in' || action === 'sign-up') {
+    const email = value('cloud-email');
+    const password = $('#cloud-password').value;
+    if (!email || !password) throw new Error('Informe e-mail e senha.');
+    if (action === 'sign-in') await client.signIn(email, password);
+    else if (!(await client.signUp(email, password)).signedIn) {
+      toast('Conta criada. Confirme pelo link enviado ao e-mail e depois entre.');
+      return;
+    }
+    cloudOrgs = null;
+  } else if (action === 'sign-out') {
+    await client.signOut();
+    cloud.org = null;
+    cloudOrgs = cloudMembers = cloudConflict = null;
+    cloudStatus = { kind: '', text: '', detail: '' };
+  } else if (action === 'use-org') {
+    chooseOrg(cloudOrgs.find((o) => o.id === $('#cloud-org').value));
+  } else if (action === 'create-org') {
+    const name = value('cloud-org-name');
+    if (!name) throw new Error('Informe o nome da empresa.');
+    const id = await client.rpc('create_organization', { p_name: name });
+    chooseOrg({ id, name, role: 'admin' });
+    cloudOrgs = null;
+  } else if (action === 'change-org') {
+    cloud.org = null;
+    cloudOrgs = cloudMembers = cloudConflict = null;
+  } else if (action === 'sync') {
+    cloudConflict = null;
+  } else if (action === 'resolve-pull') {
+    await syncCloud({ resolve: 'pull', quiet: false });
+  } else if (action === 'resolve-push') {
+    if (!confirm('Gravar a versão deste computador por cima da que está na nuvem?')) return;
+    await syncCloud({ resolve: 'push', quiet: false });
+  } else if (action === 'add-member') {
+    const email = value('member-email');
+    if (!email) throw new Error('Informe o e-mail da pessoa.');
+    await client.rpc('add_member', { p_org: cloud.org.id, p_email: email, p_role: $('#member-role').value, p_display_name: value('member-name') });
+    cloudMembers = null;
+    toast(`${email} está na equipe.`);
+  } else if (action === 'remove-member') {
+    if (!confirm(`Tirar ${target.dataset.name || 'esta pessoa'} da empresa?`)) return;
+    await client.rpc('remove_member', { p_org: cloud.org.id, p_user: target.dataset.user });
+    cloudMembers = null;
+  }
+  await saveCloud();
+  renderCloud();
+  if (['use-org', 'create-org', 'sync'].includes(action)) await syncCloud({ quiet: false });
+}
+
+function wireCloud() {
+  $('#cloud').addEventListener('click', async (e) => {
+    const target = e.target.closest('[data-cloud]');
+    if (!target || target.disabled) return;
+    target.disabled = true;
+    try {
+      await cloudAction(target.dataset.cloud, target);
+    } catch (err) {
+      toast(err.message);
+    } finally {
+      target.disabled = false;
+    }
+  });
+  $('#cloud-status').addEventListener('click', () => {
+    state.tab = 'integrations';
+    render();
+  });
+  window.addEventListener('online', () => syncCloud());
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') syncCloud();
+  });
+}
+
 // ---------- geral ----------
 
 let toastTimer;
@@ -1542,6 +1907,7 @@ function render() {
   if (state.tab === 'stores') renderStoresTab();
   if (state.tab === 'integrations') renderIntegrationsTab();
   renderExecutionTab();
+  renderCloud();
   save();
 }
 
@@ -1670,6 +2036,8 @@ wireStores();
 wireExecution();
 wireIntegrations();
 wireStoreSales();
+wireCloud();
 wireGeneral();
 if (state.planogram) render();
 else regenerate();
+syncCloud();
